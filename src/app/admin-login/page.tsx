@@ -26,9 +26,13 @@ export default function AdminLoginPage() {
             const storedAdmin = localStorage.getItem("admin");
             if (storedAdmin) {
                 try {
-                    JSON.parse(storedAdmin);
+                    const parsed = JSON.parse(storedAdmin);
                     if (isMounted) {
-                        router.replace("/admin/events");
+                        if (parsed.role === "super_admin") {
+                            router.replace("/super-admin");
+                        } else {
+                            router.replace("/admin/events");
+                        }
                         return;
                     }
                 } catch {
@@ -44,7 +48,11 @@ export default function AdminLoginPage() {
                     if (data?.success && data?.admin) {
                         localStorage.setItem("admin", JSON.stringify(data.admin));
                         if (isMounted) {
-                            router.replace("/admin/events");
+                            if (data.admin.role === "super_admin") {
+                                router.replace("/super-admin");
+                            } else {
+                                router.replace("/admin/events");
+                            }
                             return;
                         }
                     }
@@ -81,7 +89,11 @@ export default function AdminLoginPage() {
 
             if (data.success) {
                 localStorage.setItem("admin", JSON.stringify(data.admin));
-                router.push("/admin/events");
+                if (data.role === "super_admin") {
+                    router.push("/super-admin");
+                } else {
+                    router.push("/admin/events");
+                }
             } else {
                 setError(data.message || "Invalid credentials");
             }
@@ -124,7 +136,7 @@ export default function AdminLoginPage() {
                         HuntBase Admin
                     </CardTitle>
                     <CardDescription className="text-gray-400">
-                        Enter your club host credentials to manage events
+                        Enter club host credentials to manage your hunt
                     </CardDescription>
                 </CardHeader>
 
@@ -178,10 +190,18 @@ export default function AdminLoginPage() {
                         </Button>
                     </form>
 
-                    <div className="mt-6 text-center">
-                        <Link href="/" className="text-sm text-gray-400 hover:text-white">
-                            ← Back to Home
-                        </Link>
+                    <div className="mt-6 pt-4 border-t border-white/10 text-center space-y-2">
+                        <p className="text-xs text-zinc-400">
+                            Want to host a hunt for your campus club?{" "}
+                            <Link href="/register-club" className="text-emerald-400 hover:text-emerald-300 font-medium">
+                                Register Club →
+                            </Link>
+                        </p>
+                        <div>
+                            <Link href="/" className="text-xs text-zinc-500 hover:text-zinc-300">
+                                ← Back to Home
+                            </Link>
+                        </div>
                     </div>
                 </CardContent>
             </Card>

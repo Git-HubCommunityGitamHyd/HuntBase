@@ -20,8 +20,8 @@ export async function POST(request: NextRequest) {
         const { data: hostUser, error: hostError } = await supabase
             .from("host_users")
             .select("id, organization_id, email, username, full_name, role, is_active, password_hash")
-            .or(`username.eq.${username},email.eq.${username}`)
-            .single();
+            .or(`username.eq.${username.trim()},email.eq.${username.trim()}`)
+            .maybeSingle();
 
         if (!hostError && hostUser) {
             if (!hostUser.is_active) {
@@ -39,18 +39,29 @@ export async function POST(request: NextRequest) {
                 );
             }
 
+            // Fetch organization details
+            const { data: org } = await supabase
+                .from("organizations")
+                .select("id, name, slug, logo_url, is_verified")
+                .eq("id", hostUser.organization_id)
+                .single();
+
+            // Block unverified clubs from accessing dashboard until Super Admin verifies them
+            if (hostUser.role === "club_admin" && org && !org.is_verified) {
+                return NextResponse.json(
+                    {
+                        success: false,
+                        message: "Your club application is currently under review by the Super Admin. You will gain access once approved.",
+                    },
+                    { status: 403 }
+                );
+            }
+
             // Update last login
             await supabase
                 .from("host_users")
                 .update({ last_login_at: new Date().toISOString() })
                 .eq("id", hostUser.id);
-
-            // Fetch organization details
-            const { data: org } = await supabase
-                .from("organizations")
-                .select("id, name, slug, logo_url")
-                .eq("id", hostUser.organization_id)
-                .single();
 
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
             const { password_hash: _pwd, ...safeUser } = hostUser;
@@ -58,6 +69,7 @@ export async function POST(request: NextRequest) {
             const response = NextResponse.json({
                 success: true,
                 message: "Admin login successful",
+                role: hostUser.role,
                 admin: {
                     ...safeUser,
                     organization: org || null,
@@ -105,6 +117,7 @@ export async function POST(request: NextRequest) {
         const response = NextResponse.json({
             success: true,
             message: "Admin login successful",
+            role: "super_admin",
             admin: safeLegacyAdmin,
         });
 
@@ -112,7 +125,7 @@ export async function POST(request: NextRequest) {
         return setSessionCookie(response, {
             id: legacyAdmin.id,
             username: legacyAdmin.username || "admin",
-            role: "club_admin",
+            role: "super_admin",
             organization_id: (legacyAdmin as { organization_id?: string }).organization_id || "a0000000-0000-0000-0000-000000000001",
         });
     } catch (error) {
