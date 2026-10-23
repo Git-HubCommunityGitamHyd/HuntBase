@@ -1,22 +1,89 @@
 // Database types for Supabase tables
 
+export type ThemePreset = 
+  | 'cyber-matrix'
+  | 'neon-kahoot'
+  | 'parchment-quest'
+  | 'arcade-80s'
+  | 'minimalist-mono'
+  | 'custom';
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  logo_url: string | null;
+  banner_url: string | null;
+  contact_email: string | null;
+  is_verified: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HostUser {
+  id: string;
+  organization_id: string;
+  email: string;
+  username: string;
+  full_name: string;
+  role: 'super_admin' | 'club_admin';
+  is_active: boolean;
+  last_login_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThemeConfig {
+  id: string;
+  organization_id: string;
+  preset_id: ThemePreset;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  background_color: string;
+  card_color: string;
+  text_color: string;
+  border_radius: string;
+  font_family: string;
+  banner_url?: string | null;
+  custom_css?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PasswordResetToken {
+  id: string;
+  user_id: string;
+  token_hash: string;
+  expires_at: string;
+  used: boolean;
+  created_at: string;
+}
+
+export type HuntStatus = 'draft' | 'scheduled' | 'active' | 'paused' | 'completed';
+
 export interface Event {
   id: string;
+  organization_id?: string;
   name: string;
   start_time: string;
   end_time: string;
   is_active: boolean;
   created_at: string;
-  // New fields
+  // Timer & settings
   hunt_started_at?: string | null;
+  hunt_ended_at?: string | null;
   hunt_duration_minutes?: number;
   hint_delay_minutes?: number;
+  hunt_status?: HuntStatus;
   default_min_players?: number;
   default_max_players?: number;
 }
 
 export interface Team {
   id: string;
+  organization_id?: string;
   event_id: string;
   team_name: string;
   username: string | null; // Now optional - players register with individual accounts
@@ -80,6 +147,8 @@ export interface TeamClueOrder {
 
 export interface Scan {
   id: string;
+  organization_id?: string;
+  event_id?: string;
   team_id: string;
   clue_id: string;
   qr_code_id: string;
@@ -91,6 +160,8 @@ export interface Scan {
 
 export interface FakeQRScan {
   id: string;
+  organization_id?: string;
+  event_id?: string;
   qr_code_id: string;
   team_id: string;
   player_id: string;
@@ -110,6 +181,7 @@ export interface LoginResponse {
   success: boolean;
   message: string;
   team?: Team;
+  hostUser?: HostUser;
 }
 
 // Form types
@@ -117,6 +189,7 @@ export interface CreateEventForm {
   name: string;
   start_time: string;
   end_time: string;
+  organization_id?: string;
 }
 
 export interface CreateClueForm {
@@ -151,6 +224,26 @@ export interface GeneratedTeamCredential {
 export type Database = {
   public: {
     Tables: {
+      organizations: {
+        Row: Organization;
+        Insert: Omit<Organization, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<Organization, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      host_users: {
+        Row: HostUser;
+        Insert: Omit<HostUser, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<HostUser, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      theme_configs: {
+        Row: ThemeConfig;
+        Insert: Omit<ThemeConfig, 'id' | 'created_at' | 'updated_at'>;
+        Update: Partial<Omit<ThemeConfig, 'id' | 'created_at' | 'updated_at'>>;
+      };
+      password_reset_tokens: {
+        Row: PasswordResetToken;
+        Insert: Omit<PasswordResetToken, 'id' | 'created_at'>;
+        Update: Partial<Omit<PasswordResetToken, 'id' | 'created_at'>>;
+      };
       events: {
         Row: Event;
         Insert: Omit<Event, 'id' | 'created_at'>;
@@ -180,6 +273,11 @@ export type Database = {
         Row: Scan;
         Insert: Omit<Scan, 'id' | 'scanned_at'>;
         Update: Partial<Omit<Scan, 'id' | 'scanned_at'>>;
+      };
+      fake_qr_scans: {
+        Row: FakeQRScan;
+        Insert: Omit<FakeQRScan, 'id' | 'scanned_at'>;
+        Update: Partial<Omit<FakeQRScan, 'id' | 'scanned_at'>>;
       };
     };
   };

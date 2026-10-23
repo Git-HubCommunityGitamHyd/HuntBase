@@ -19,6 +19,13 @@ export default function ProgressPage() {
     const [totalClues, setTotalClues] = useState(0);
     const [timeRemaining, setTimeRemaining] = useState({ hours: 0, minutes: 0, seconds: 0, isExpired: false });
     const [isLoading, setIsLoading] = useState(true);
+    const [currentTime, setCurrentTime] = useState<number>(0);
+
+    useEffect(() => {
+        setCurrentTime(Date.now());
+        const interval = setInterval(() => setCurrentTime(Date.now()), 1000);
+        return () => clearInterval(interval);
+    }, []);
 
     const fetchData = useCallback(async (teamData: Team) => {
         const supabase = createClient();
@@ -128,12 +135,11 @@ export default function ProgressPage() {
 
     // Check if hunt is complete or timed out
     const isHuntComplete = localTeam.current_step >= totalClues && totalClues > 0;
-    const isHuntTimedOut = event?.hunt_started_at && (() => {
-        const huntDuration = (event.hunt_duration_minutes || 60) * 60 * 1000;
-        const huntStartTime = new Date(event.hunt_started_at).getTime();
-        const huntEndTime = huntStartTime + huntDuration;
-        return Date.now() >= huntEndTime;
-    })();
+    const isHuntTimedOut = Boolean(
+        event?.hunt_started_at &&
+        currentTime > 0 &&
+        currentTime >= (new Date(event.hunt_started_at).getTime() + (event.hunt_duration_minutes || 60) * 60 * 1000)
+    );
 
     // Block access during active hunt to prevent collusion
     if (!isHuntComplete && !isHuntTimedOut) {

@@ -131,8 +131,9 @@ export default function QRCodesPage() {
             setSuccess(`Fake QR "${fakeForm.label}" created successfully!`);
             setFakeForm({ label: "", redirect_url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ" });
             fetchFakeQRs();
-        } catch (err: any) {
-            setError(err.message || "Failed to create fake QR code");
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "Failed to create fake QR code";
+            setError(message);
             console.error(err);
         } finally {
             setCreatingFake(false);
@@ -155,8 +156,9 @@ export default function QRCodesPage() {
 
             setSuccess("Fake QR deleted");
             fetchFakeQRs();
-        } catch (err: any) {
-            setError(err.message || "Failed to delete fake QR");
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : "Failed to delete fake QR";
+            setError(message);
         }
     };
 
@@ -478,6 +480,7 @@ export default function QRCodesPage() {
                         {qrPreview?.dataUrl && (
                             <>
                                 <div className={`p-4 bg-white rounded-lg ${qrPreview.type === 'fake' ? 'ring-2 ring-red-500' : ''}`}>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
                                     <img 
                                         src={qrPreview.dataUrl} 
                                         alt="QR Code Preview" 

@@ -47,74 +47,40 @@ export default function HuntPage() {
 
     const fetchCurrentClue = useCallback(async (teamData: Team) => {
         try {
-            const supabase = createClient();
+            const response = await fetch("/api/hunt/current-clue", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ team_id: teamData.id }),
+            });
 
-            const { data: cluesCount } = await supabase
-                .from("clues")
-                .select("id", { count: "exact" })
-                .eq("event_id", teamData.event_id);
+            const data = await response.json();
 
-            setTotalClues(cluesCount?.length || 0);
+            if (data.success) {
+                setTotalClues(data.totalClues || 0);
+                if (data.event) {
+                    setEvent(data.event);
+                }
 
-            const { data: clueOrder } = await supabase
-                .from("team_clue_order")
-                .select("*")
-                .eq("team_id", teamData.id)
-                .eq("step_index", teamData.current_step)
-                .single();
+                if (data.isComplete) {
+                    setCurrentClue(null);
+                    setCurrentClueOrder(null);
+                } else {
+                    setCurrentClue(data.clue);
+                    setCurrentClueOrder(data.clueOrder);
 
-            if (clueOrder) {
-                // Always call the API to get/set clue_started_at (uses admin client, bypasses RLS)
-                // This ensures we get the authoritative timestamp from the database
-                try {
-                    const response = await fetch("/api/hints/start-clue", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({
-                            team_id: teamData.id,
-                            clue_order_id: clueOrder.id,
-                        }),
-                    });
-                    const data = await response.json();
-                    if (data.success && data.clue_order) {
-                        // Use the clue_order from API (authoritative source)
-                        setCurrentClueOrder(data.clue_order);
-                        
-                        // Check if hint was already viewed
-                        if (data.clue_order.hint_viewed) {
-                            setShowHint(true);
-                        }
-                    } else {
-                        // Fallback to client-side data
-                        setCurrentClueOrder(clueOrder);
-                        if (clueOrder.hint_viewed) {
-                            setShowHint(true);
-                        }
-                    }
-                } catch (error) {
-                    console.error("Error fetching clue order from API:", error);
-                    // Fallback to client-side data
-                    setCurrentClueOrder(clueOrder);
-                    if (clueOrder.hint_viewed) {
+                    if (data.clueOrder?.hint_viewed && data.clue?.hint_text) {
                         setShowHint(true);
+                        setHintText(data.clue.hint_text);
+                    } else {
+                        setShowHint(false);
+                        setHintText(null);
                     }
                 }
-
-                const { data: clue } = await supabase
-                    .from("clues")
-                    .select("*")
-                    .eq("id", clueOrder.clue_id)
-                    .single();
-
-                setCurrentClue(clue || null);
-
-                // If hint was viewed, show it
-                if (clueOrder.hint_viewed && clue?.hint_text) {
-                    setHintText(clue.hint_text);
-                }
+            } else {
+                console.warn("Failed to fetch current clue:", data.message);
             }
         } catch (error) {
-            console.error("Error fetching clue:", error);
+            console.error("Error fetching current clue:", error);
         }
     }, []);
 

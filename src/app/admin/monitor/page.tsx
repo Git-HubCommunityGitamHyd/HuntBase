@@ -60,22 +60,26 @@ export default function MonitorPage() {
         setTotalClues(count || 0);
 
         if (teamsData) {
-            // Get last scan for each team
-            const teamsWithScans: TeamWithScan[] = await Promise.all(
-                teamsData.map(async (team: Team) => {
-                    const { data: scans } = await supabase
-                        .from("scans")
-                        .select("*")
-                        .eq("team_id", team.id)
-                        .order("scanned_at", { ascending: false })
-                        .limit(1);
+            // Batch fetch all scans for this event in a single query (eliminates N+1)
+            const { data: eventScans } = await supabase
+                .from("scans")
+                .select("*")
+                .eq("event_id", selectedEvent)
+                .order("scanned_at", { ascending: false });
 
-                    return {
-                        ...team,
-                        lastScan: scans?.[0] || undefined,
-                    };
-                })
-            );
+            const latestScanByTeam = new Map();
+            if (eventScans) {
+                for (const scan of eventScans) {
+                    if (!latestScanByTeam.has(scan.team_id)) {
+                        latestScanByTeam.set(scan.team_id, scan);
+                    }
+                }
+            }
+
+            const teamsWithScans: TeamWithScan[] = teamsData.map((team: Team) => ({
+                ...team,
+                lastScan: latestScanByTeam.get(team.id) || undefined,
+            }));
 
             setTeams(teamsWithScans);
         }
@@ -86,7 +90,7 @@ export default function MonitorPage() {
 
         const supabase = createClient();
 
-        // Get fake QR scans with team and qr_code details
+        // Query fake QR scans directly filtered by event_id in SQL
         const { data: fakeScans } = await supabase
             .from("fake_qr_scans")
             .select(`
@@ -94,15 +98,11 @@ export default function MonitorPage() {
                 team:teams(*),
                 qr_code:qr_codes(*)
             `)
+            .eq("event_id", selectedEvent)
             .order("scanned_at", { ascending: false })
             .limit(20);
 
-        // Filter to only include scans from teams in the selected event
-        const filteredScans = (fakeScans || []).filter(
-            (scan: FakeQRScanWithDetails) => scan.team?.event_id === selectedEvent
-        );
-
-        setFakeQRScans(filteredScans);
+        setFakeQRScans(fakeScans || []);
     }, [selectedEvent]);
 
     const fetchEvents = async () => {
@@ -149,13 +149,14 @@ export default function MonitorPage() {
                 .subscribe();
 
             const scansChannel = supabase
-                .channel("monitor-scans")
+                .channel(`monitor-scans-${selectedEvent}`)
                 .on(
                     "postgres_changes",
                     {
                         event: "INSERT",
                         schema: "public",
                         table: "scans",
+                        filter: `event_id=eq.${selectedEvent}`,
                     },
                     () => {
                         fetchTeams();
@@ -163,15 +164,16 @@ export default function MonitorPage() {
                 )
                 .subscribe();
 
-            // Subscribe to fake QR scans (Hall of Shame)
+            // Subscribe to fake QR scans (filtered by event_id)
             const fakeScansChannel = supabase
-                .channel("monitor-fake-scans")
+                .channel(`monitor-fake-scans-${selectedEvent}`)
                 .on(
                     "postgres_changes",
                     {
                         event: "INSERT",
                         schema: "public",
                         table: "fake_qr_scans",
+                        filter: `event_id=eq.${selectedEvent}`,
                     },
                     () => {
                         fetchFakeQRScans();
