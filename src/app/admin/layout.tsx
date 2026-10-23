@@ -21,20 +21,68 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const [isLoading, setIsLoading] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Hydrate admin from localStorage on mount
+    // Hydrate admin from localStorage or server session on mount
     useEffect(() => {
-        const storedAdmin = localStorage.getItem("admin");
-        if (!storedAdmin) {
-            router.push("/admin-login");
-            return;
+        let isMounted = true;
+
+        async function verifyAdminAuth() {
+            // 1. Try local storage cache first
+            const storedAdmin = localStorage.getItem("admin");
+            if (storedAdmin) {
+                try {
+                    const parsed = JSON.parse(storedAdmin);
+                    if (isMounted) {
+                        setAdmin(parsed);
+                        setIsLoading(false);
+                        return;
+                    }
+                } catch {
+                    localStorage.removeItem("admin");
+                }
+            }
+
+            // 2. If not in localStorage, verify against server session
+            try {
+                const res = await fetch("/api/auth/me");
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.success && data.admin) {
+                        localStorage.setItem("admin", JSON.stringify(data.admin));
+                        if (isMounted) {
+                            setAdmin(data.admin);
+                            setIsLoading(false);
+                            return;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to verify server session:", err);
+            }
+
+            // 3. If neither worked, redirect to login
+            if (isMounted) {
+                setIsLoading(false);
+                router.push("/admin-login");
+            }
         }
-        setAdmin(JSON.parse(storedAdmin));
-        setIsLoading(false);
+
+        verifyAdminAuth();
+
+        return () => {
+            isMounted = false;
+        };
     }, [router]);
 
-    const handleLogout = () => {
-        localStorage.removeItem("admin");
-        router.push("/admin-login");
+    const handleLogout = async () => {
+        try {
+            await fetch("/api/auth/logout", { method: "POST" });
+        } catch (err) {
+            console.error("Logout request failed:", err);
+        } finally {
+            localStorage.removeItem("admin");
+            setAdmin(null);
+            router.push("/admin-login");
+        }
     };
 
     if (isLoading) {
@@ -75,8 +123,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     }`}
             >
                 <div className="p-6 border-b border-white/10">
-                    <h1 className="text-xl font-bold text-white">Techscapades 4.0</h1>
-                    <p className="text-sm text-gray-400 mt-1">Admin Dashboard</p>
+                    <h1 className="text-xl font-bold text-white">HuntBase Admin</h1>
+                    <p className="text-sm text-gray-400 mt-1">Club Admin Dashboard</p>
                 </div>
 
                 <nav className="p-4 space-y-1">

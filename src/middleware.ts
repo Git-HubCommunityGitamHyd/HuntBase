@@ -7,12 +7,6 @@ export function middleware(request: NextRequest) {
 
     // 1. Exclude public admin login page from route interception
     if (pathname === "/admin-login") {
-        const sessionCookie = request.cookies.get("huntbase_session");
-        const session = sessionCookie?.value ? decodeSession(sessionCookie.value) : null;
-        // If already logged in, redirect straight into admin dashboard
-        if (session) {
-            return NextResponse.redirect(new URL("/admin", request.url));
-        }
         return NextResponse.next();
     }
 
