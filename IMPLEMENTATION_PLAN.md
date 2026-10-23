@@ -1,138 +1,65 @@
-# Techscapades 4.0 - Implementation Plan
+# HuntBase - Implementation & Delivery Roadmap
 
-> **Status:** 95% Complete | **Last Updated:** January 19, 2026
-
----
-
-## ✅ Completed Features
-
-### Phase 1: Core Infrastructure
-- [x] Next.js 15 project setup with App Router
-- [x] Supabase integration (client + server)
-- [x] TypeScript configuration
-- [x] Tailwind CSS v4 styling
-- [x] shadcn/ui components
-- [x] Mobile-optimized viewport settings
-
-### Phase 2: Authentication System
-- [x] Player registration (`/register`)
-- [x] Player login (`/login`)
-- [x] Admin login (`/admin-login`)
-- [x] AuthContext for state management
-- [x] Password hashing with bcrypt
-- [x] Session persistence with localStorage
-
-### Phase 3: Admin Dashboard
-- [x] Admin layout with sidebar
-- [x] Event management (CRUD) - **Fixed: duration calculation, duplicate prevention**
-- [x] Team management (CRUD) - **Fixed: easier creation workflow**
-- [x] Clue management (CRUD)
-- [x] Player management (move, remove, reset password)
-- [x] QR code generation (ZIP download) - **Fixed: API refactored**
-- [x] QR code preview - **NEW: preview before generating**
-- [x] Fake QR codes (Hall of Shame) - **Fixed: proper API endpoints**
-- [x] Live monitoring dashboard
-- [x] Start/Stop hunt controls
-- [x] Team disqualification
-- [x] Score adjustment
-- [x] Export players to CSV
-
-### Phase 4: Player Experience
-- [x] Hunt page with current clue - **Fixed: loading state, fetch order**
-- [x] QR code scanner (html5-qrcode)
-- [x] Manual QR input for testing
-- [x] Global countdown timer
-- [x] Timed hint system
-- [x] Progress page (locked during hunt)
-- [x] Completion/timeout states
-
-### Phase 5: Game Logic
-- [x] Round-robin clue distribution
-- [x] Per-team randomized clue order
-- [x] QR validation against team's expected clue
-- [x] Points system (10 normal, 5 with hint)
-- [x] Duplicate scan prevention
-- [x] Hunt timer enforcement
-
-### Phase 6: Real-time Features
-- [x] Live team progress updates
-- [x] Event state subscriptions
-- [x] Scan tracking
-- [x] Fake QR scan tracking
-
-### Phase 7: Mobile Optimization
-- [x] Viewport meta tags
-- [x] Touch-friendly CSS
-- [x] Safe area insets
-- [x] Minimum touch target sizes
-- [x] Input zoom prevention (iOS)
+> **Status:** Phase 1, 2 & 3 Complete (Production Grade)  
+> **Target Milestone:** Review 1 (Sunday, 25 Oct at 16:30 with Harshavardhan Reddy)  
+> **Lead Modernizer:** @AllikaSaiHarsha
 
 ---
 
-## 🟡 Testing Needed
+## 🎯 Completed Deliverables (October 2026)
 
-### End-to-End Testing
-- [ ] Full scan flow on mobile devices
-- [ ] iOS Safari camera access
-- [ ] Real-time updates reliability
+### Phase 1: Database Architecture & Multi-Tenancy
+- [x] Consolidate fragmented migrations into single idempotent `supabase/schema.sql`
+- [x] Multi-tenant organization structure (`organizations`, `host_users`, `theme_configs`)
+- [x] Automated 16/16 test suite verifying ACID constraints, cascading deletes, and unique slugs
+- [x] RLS security lockdown blocking unauthenticated reading of secret clues and QR tokens
+- [x] Storage bucket `organization-assets` configuration with 5MB quota
+- [x] Realtime publication setup with `REPLICA IDENTITY FULL` for live monitor
 
-See `PENDING.md` for detailed testing checklist.
+### Phase 2: QR Scanner Overhaul & Anti-Cheat
+- [x] Mobile camera lifecycle management preventing iOS Safari camera freezes
+- [x] Native phone camera QR scanning with automatic `?token=` parameter extraction
+- [x] Token sanitization and input validation
+- [x] Haptic feedback integration (`navigator.vibrate`)
+- [x] Preservation of redirect intent (`/login?redirect=...`) for logged-out players
 
----
-
-## 📁 Key Files
-
-| File | Purpose |
-|------|---------|
-| `TECHNICAL_DOCUMENTATION.md` | Full technical docs |
-| `PENDING.md` | Known issues & testing checklist |
-| `supabase/schema.sql` | Database schema |
-| `supabase/SETUP_GUIDE.md` | DB setup instructions |
-
----
-
-## 🆕 New API Routes (Jan 17-19)
-
-| Route | Purpose |
-|-------|---------|
-| `/api/admin/qr/fake` | CRUD for fake QR codes |
-| `/api/admin/qr/token` | Get/generate QR tokens for clues |
+### Phase 3: Security & Server-Side Data Protection
+- [x] Eliminating client-side answer leaks via secure `GET /api/hunt/current-clue` endpoint
+- [x] Stripping secret `admin_notes` and `location_name` from client network inspection
+- [x] Gating `hint_text` behind penalty confirmation
+- [x] Edge route protection via `src/middleware.ts` and HttpOnly `huntbase_session` cookies
+- [x] Resolving team refresh 404 with dedicated `/api/teams/[id]` route
+- [x] Live monitor query batching and room-scoped WebSocket channels
 
 ---
 
-## 🚀 Deployment
+## 🔨 Current Sprint: Club Branding & Theme Customizer
 
-### Vercel
-- Connected to GitHub repo
-- Environment variables configured
-- Auto-deploys on push
-
-### Environment Variables Required
-```
-NEXT_PUBLIC_SUPABASE_URL=xxx
-NEXT_PUBLIC_SUPABASE_ANON_KEY=xxx
-SUPABASE_SERVICE_ROLE_KEY=xxx
-```
-
----
-
-## 📋 Pre-Event Checklist
-
-- [ ] Verify QR scanning works end-to-end
-- [ ] Test on actual mobile devices
-- [ ] Create production admin user
-- [ ] Set up event with correct times
-- [ ] Generate and print QR codes
-- [ ] Disable RLS or configure policies
-- [ ] Brief volunteers on admin panel
+### Phase 4: "Wix for Hunts" Dynamic Theme Engine
+- [ ] Theme Customizer page in Admin Dashboard (`src/app/admin/theme/page.tsx`)
+- [ ] 5 Pre-configured aesthetic presets:
+  - *Cyber Matrix* (Green & Dark Mode)
+  - *Neon Kahoot* (Vibrant Purple & Electric Cyan)
+  - *Parchment Quest* (Warm Amber & Antique Brass)
+  - *Arcade 80s* (Retro Magenta & Sunset Gold)
+  - *Minimalist Mono* (Clean Slate & Monochrome)
+- [ ] Color picker controls for primary, accent, card, and background tokens
+- [ ] Direct club logo and banner upload via `POST /api/admin/upload-asset`
+- [ ] Live interactive mobile preview iframe
+- [ ] Dynamic CSS token injection via `ThemeContext.tsx` on player pages (`/hunt`, `/scan`, `/login`)
 
 ---
 
-## 📝 Contributors
+## 📋 Review 1 Checklist (Sunday, 25 Oct @ 16:30)
 
-- Initial Development: @harsha
-- Bug Fixes & Features (Jan 17-19): @SaiGurulnukurthi
+- [x] Single consolidated schema file in `supabase/schema.sql`
+- [x] 16/16 database integration tests passing
+- [x] Scanner works reliably on iOS Safari and Android Chrome
+- [x] Zero clue location/answer leaks in browser DevTools
+- [x] Working admin dashboard with secure cookie authentication
+- [ ] Interactive theme customizer working live on host dashboard
+- [ ] Playwright E2E smoke test verifying full hunt cycle
 
 ---
 
-*For detailed information, see `TECHNICAL_DOCUMENTATION.md`*
+*GitHub Community GITAM - HuntBase Engineering Team*

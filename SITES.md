@@ -1,147 +1,73 @@
-# Techscapades - Site Map
+# HuntBase - Site Map & Route Reference
 
-Quick navigation reference for all pages in the application.
+Comprehensive navigation and endpoint reference for HuntBase.
 
-**Base URL:** `http://localhost:3000` (dev) or your deployed domain
-
----
-
-## 🎮 Player Side (Team/Participant)
-
-| Route | Page | Description |
-|-------|------|-------------|
-| `/` | Home | Landing page |
-| `/login` | Team Login | Teams enter username & password to join the hunt |
-| `/hunt` | Active Hunt | Shows current clue, main gameplay screen |
-| `/scan` | QR Scanner | Camera-based QR code scanning page |
-| `/progress` | Progress View | Team's progress, score, and completion status |
-
-### Player Flow
-```
-/login → /hunt → /scan → /hunt (next clue) → ... → /progress (completion)
-```
+**Base URL:** `http://localhost:3000` (development) or production domain.
 
 ---
 
-## 🔐 Admin Side (Dashboard)
+## 🎮 Participant Portal (Mobile-First Experience)
 
-| Route | Page | Description |
-|-------|------|-------------|
-| `/admin-login` | Admin Login | Admin authentication page |
-| `/admin` | Dashboard Home | Admin dashboard overview/redirect |
-| `/admin/events` | Events | Create, edit, and manage hunt events |
-| `/admin/clues` | Clues | Add, edit, reorder clues with admin notes |
-| `/admin/teams` | Teams | Generate and manage team accounts |
-| `/admin/qr-codes` | QR Codes | Generate and download QR codes for clues |
-| `/admin/monitor` | Live Monitor | Real-time team progress tracking |
+| Route | Page | Description | Access Control |
+|---|---|---|---|
+| `/` | Landing Page | Public platform landing page and club showcase | Public |
+| `/login` | Team Login | Team credential authentication | Public |
+| `/hunt` | Active Gameplay | Displays current riddle; consumes `/api/hunt/current-clue` | Team Session Required |
+| `/scan` | QR Scanner | Camera-based scanner with native camera auto-redirect | Team Session Required |
+| `/progress` | Progress & Results | Team score, completed checkpoints, and finish state | Team Session Required |
 
-### Admin Navigation (Sidebar Order)
-```
-📅 Events
-🔍 Clues
-👥 Teams
-📱 QR Codes
-📡 Live Monitor
+### Player Workflow
+```mermaid
+flowchart LR
+    Login["/login"] --> Hunt["/hunt (Current Riddle)"]
+    Hunt --> Scan["/scan (Camera / Auto-Token)"]
+    Scan --> API["/api/scan (Verification)"]
+    API --> Hunt
+    Hunt --> Progress["/progress (Hunt Complete)"]
 ```
 
 ---
 
-## 🔗 Quick Links
+## 🛡️ Host & Club Administration Dashboard
 
-### Development
-- **Player Login:** [localhost:3000/login](http://localhost:3000/login)
-- **Admin Login:** [localhost:3000/admin-login](http://localhost:3000/admin-login)
-- **Hunt Page:** [localhost:3000/hunt](http://localhost:3000/hunt)
-- **Admin Dashboard:** [localhost:3000/admin](http://localhost:3000/admin)
-
-### Common Admin Tasks
-| Task | Go To |
-|------|-------|
-| Create new event | `/admin/events` |
-| Add clues to event | `/admin/clues` |
-| Generate team accounts | `/admin/teams` |
-| Download QR codes | `/admin/qr-codes` |
-| Monitor live progress | `/admin/monitor` |
+| Route | Page | Description | Access Control |
+|---|---|---|---|
+| `/admin-login` | Host Login | Club organizer & Super Admin authentication | Public |
+| `/admin` | Host Overview | Dashboard summary and active event quick-actions | Host Cookie Guard |
+| `/admin/events` | Event Management | Create, schedule, activate, and finish hunt events | Host Cookie Guard |
+| `/admin/clues` | Clue Management | Riddles, hint delays, secret answers & locations | Host Cookie Guard |
+| `/admin/teams` | Team Management | Bulk team credential generator, rosters, score overrides | Host Cookie Guard |
+| `/admin/qr-codes` | QR Generation | Clue QR codes, decoy fake codes, and bulk ZIP export | Host Cookie Guard |
+| `/admin/theme` | Theme Customizer | Dynamic club styling, presets, color tokens, and asset uploads | Host Cookie Guard |
+| `/admin/monitor` | Live Monitor | Real-time WebSocket board: live rankings, scans, decoy traps | Host Cookie Guard |
 
 ---
 
-## 📱 API Routes
+## 🔌 API Endpoints Reference
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/auth/login` | POST | Team login |
-| `/api/auth/admin-login` | POST | Admin login |
-| `/api/scan` | POST | QR code validation |
-| `/api/admin/events` | CRUD | Event management |
-| `/api/admin/clues` | CRUD | Clue management |
-| `/api/admin/teams` | GET/DELETE | Team management |
-| `/api/admin/teams/generate` | POST | Bulk team generation |
-| `/api/admin/qr/generate` | POST | QR code generation |
+### Participant & Game Engine Endpoints
+- `POST /api/auth/login`: Team credential validation & token issuance.
+- `GET /api/hunt/current-clue`: Secure endpoint delivering active riddle (admin notes & coordinates stripped).
+- `POST /api/scan`: Checkpoint token verification, anti-cheat validation, order progression, and scoring.
+- `GET /api/teams/[id]`: Fresh team stats and step synchronization.
+- `POST /api/hints/view`: Logs hint penalty and reveals hint text.
 
----
-
-## 🎨 Page Purposes
-
-### Player Pages
-
-**`/login`**
-- Simple username/password form
-- Redirects to `/hunt` on success
-
-**`/hunt`**
-- Displays current clue text
-- Shows step progress (e.g., "Clue 3 of 10")
-- "Scan QR" button to proceed
-
-**`/scan`**
-- Opens device camera
-- Scans QR code
-- Validates and advances on success
-
-**`/progress`**
-- Shows completion status
-- Displays final score
-- Shows all clues completed
-
-### Admin Pages
-
-**`/admin/events`**
-- Create new treasure hunt events
-- Set start/end times
-- Activate/deactivate events
-- Edit existing events
-
-**`/admin/clues`**
-- Add riddles/clues for selected event
-- Reorder clues (drag up/down)
-- Add location hints
-- Add admin notes (answers visible only to admins)
-
-**`/admin/teams`**
-- Bulk generate team accounts
-- Set team name prefix and count
-- View generated credentials
-- Delete teams
-
-**`/admin/qr-codes`**
-- View all clues for selected event
-- Generate QR codes
-- Download individual or bulk QR images
-
-**`/admin/monitor`**
-- Real-time team leaderboard
-- View progress bars per team
-- Adjust scores (+/- buttons)
-- Disqualify/reinstate teams
-- Collapsible clue answer reference
-- End event button
+### Administrative & Management Endpoints
+- `POST /api/auth/admin-login`: Host authentication and HttpOnly session cookie issuance.
+- `POST /api/admin/upload-asset`: Multipart upload for club logos and banners to Supabase Storage.
+- `GET / POST /api/admin/events`: Event creation and lifecycle control.
+- `POST /api/admin/events/start-hunt`: Triggers round-robin clue distribution and starts countdown.
+- `POST /api/admin/events/stop-hunt`: Terminates event timer and locks participant progress.
+- `GET / POST /api/admin/clues`: Clue repository management.
+- `GET / POST /api/admin/teams/generate`: Bulk algorithmic team account generation.
+- `GET / POST /api/admin/qr/generate`: Server-side PNG/SVG QR generation and ZIP packaging.
 
 ---
 
-## 🔒 Access Control
+## 🔒 Security & Middleware Matrix
 
-| Page Type | Required Auth |
-|-----------|---------------|
-| `/login`, `/admin-login` | None (public) |
-| `/hunt`, `/scan`, `/progress` | Team login required |
-| `/admin/*` | Admin login required |
+All `/admin/*`, `/super-admin/*`, and `/api/admin/*` endpoints are protected by `src/middleware.ts` verifying the encrypted `huntbase_session` cookie before rendering or executing requests.
+
+---
+
+*GitHub Community GITAM - HuntBase Platform*

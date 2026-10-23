@@ -1,200 +1,73 @@
-# Pending Issues & Testing Tasks
+# HuntBase - Platform Status & Testing Log
 
-> Last Updated: January 19, 2026
-> Status: **Most issues resolved by @SaiGurulnukurthi**
-
----
-
-## 🟢 Recently Fixed Issues (Jan 17-19)
-
-### ✅ Issue #7: Unable to select event to create a new QR
-
-**Fixed by:** @SaiGurulnukurthi
-**Solution:**
-
-- Created new API endpoints for QR management
-- Added QR preview functionality with modal dialog
-- QR codes page now uses API endpoints instead of direct Supabase client
-
-### ✅ Issue #6: Hassle to create multiple teams
-
-**Fixed by:** @SaiGurulnukurthi
-**Solution:** Improved team creation workflow
-
-### ✅ Issue #5: Event duration not updating with date selection
-
-**Fixed by:** @SaiGurulnukurthi
-**Solution:**
-
-- Added `calculateDuration()` function for automatic duration calculation
-- Added `calculateEndDateTime()` for computing end time from duration
-- Form now syncs duration when dates change
-- Fixed dark mode visibility for calendar icons
-
-### ✅ Issue #4: Duplicate events when spamming create button
-
-**Fixed by:** @SaiGurulnukurthi
-**Solution:**
-
-- Added `isSubmitting` state to prevent multiple submissions
-- Added event name validation before submit
-- Button disabled during API call
-
-### ✅ Hunt Page Loading/Scanning Issues
-
-**Fixed by:** @SaiGurulnukurthi
-**Solution:**
-
-- Fixed race condition: Event now fetched BEFORE clue data
-- Added loading spinner while event data loads
-- This fixed the "Getting Your Clues Ready..." stuck state
+> **Last Updated:** October 2026  
+> **Status:** **Major Architectural & Security Overhaul Complete by @AllikaSaiHarsha**  
+> **Target Milestone:** Review 1 (Sunday, 25 Oct at 16:30 with Harshavardhan Reddy)
 
 ---
 
-## 🟢 Previously Fixed Issues (Jan 16)
+## 🟢 Resolved Core Issues (October 2026 - By @AllikaSaiHarsha)
 
-### ✅ Scanner Glitchy (Multiple Popups)
+### ✅ Scanner Camera Lifecycle & Mobile Safari Locking
+- **Problem:** Camera remained active after navigating away, causing battery drain and freezing the camera sensor on iOS Safari/Android Chrome.
+- **Solution:** 
+  - Integrated full lifecycle management with state-guarded `isScanning` checks and cleanup in `useEffect`.
+  - Added native camera auto-scan handling (`?token=...` parameter parsing) so participants scanning directly via iPhone/Android native camera apps are immediately processed.
+  - Implemented haptic vibration feedback (`navigator.vibrate`) upon successful scans.
+  - Added redirect preservation (`/login?redirect=...`) for unauthenticated participants.
 
-- Added scan lock after first detection
-- Added debounce for duplicate codes
-- Camera stops immediately on scan
-- "Try Again" button appears on error
+### ✅ Elimination of DevTools Clue & Coordinate Leaks
+- **Problem:** Direct Supabase client queries allowed technically adept participants to inspect network traffic and extract riddle answers, admin notes, and coordinates.
+- **Solution:** 
+  - Replaced client-side database reads with a secure server-side endpoint: `/api/hunt/current-clue`.
+  - Strips `admin_notes` and `location_name` before delivering payload to the client.
+  - Gates `hint_text` so it is only served if the team has explicitly triggered the hint penalty.
+  - Enabled Row Level Security (RLS) on `clues`, `qr_codes`, and `host_users` to strictly reject direct public `anon` SELECT queries.
 
-### ✅ Location Showing to Players
+### ✅ Database Consolidation & Multi-Tenant Schema
+- **Problem:** Multiple fragmented migration files caused drift and required manual setup.
+- **Solution:**
+  - Consolidated entire database architecture into a single idempotent `supabase/schema.sql` file.
+  - Established 12 core tables supporting SaaS multi-tenancy (`organizations`, `host_users`, `theme_configs`).
+  - Added automated 16/16 database test suite (`scripts/test-database-suite.js`) verifying table presence, cascading deletes, anti-cheat constraints, and Realtime publications.
+  - Created one-click execution helper (`scripts/migrate.js`).
 
-- Removed `location_name` from player view
-- Now only visible in admin panel
+### ✅ Host Session Security & Middleware Guards
+- **Problem:** Admin routes lacked server-side route guards, exposing dashboard layouts before client checks ran.
+- **Solution:**
+  - Implemented Next.js middleware with HttpOnly cookie sessions (`huntbase_session`).
+  - Guarded all `/admin/*`, `/super-admin/*`, and `/api/admin/*` paths.
 
-### ✅ Progress Page Collusion Risk
-
-- Page locked during active hunt
-- Only accessible after completion or timeout
-
-### ✅ "Step 1 of 3" Visible
-
-- Removed step count from player view
-
-### ✅ Viewport Warnings
-
-- Moved `viewport` and `themeColor` to separate export
-
-### ✅ All Lint Errors
-
-- Fixed function declaration order
-- Fixed unused variables
-- Configured eslint properly
-
----
-
-## 🟡 Testing Needed
-
-### Mobile Testing
-
-| Test Case                     | Status           | Notes           |
-| ----------------------------- | ---------------- | --------------- |
-| QR Scanner on iOS Chrome      | ⏳ Needs Testing |                 |
-| QR Scanner on iOS Safari      | ⏳ Needs Testing | May have issues |
-| QR Scanner on Android Chrome  | ⏳ Needs Testing | Should work     |
-| Touch targets (44px min)      | ✅ CSS Added     |                 |
-| Viewport zoom prevention      | ✅ CSS Added     |                 |
-
-### Scan Flow Testing
-
-| Test Case                       | Status           | Notes                        |
-| ------------------------------- | ---------------- | ---------------------------- |
-| Scan correct QR → Success       | ⏳ Likely Fixed  | Hunt page fix should resolve |
-| Scan wrong QR → Error message   | ⏳ Needs Testing |                              |
-| Scan already scanned QR → Error | ⏳ Needs Testing |                              |
-| Scan fake QR → Redirect         | ⏳ Needs Testing |                              |
-| Hunt not started → Blocked      | ⏳ Needs Testing |                              |
-| Hunt timed out → Blocked        | ⏳ Needs Testing |                              |
-
-### Admin Testing
-
-| Test Case             | Status           | Notes                |
-| --------------------- | ---------------- | -------------------- |
-| Create event          | ✅ Fixed         | Validation added     |
-| Add clues             | ✅ Works         |                      |
-| Generate QR codes     | ✅ Fixed         | API refactored       |
-| Preview QR codes      | ✅ NEW           | Added in this update |
-| Start/Stop hunt       | ⏳ Needs Testing |                      |
-| Live monitor updates  | ⏳ Needs Testing |                      |
-| Export players CSV    | ✅ Implemented   |                      |
-| Reset player password | ✅ Implemented   |                      |
+### ✅ Team Refresh 404 & Monitor Optimization
+- **Problem:** `AuthContext.tsx` failed during team refresh calls due to missing `/api/teams/[id]` endpoint.
+- **Solution:**
+  - Built dedicated `/api/teams/[id]` route returning fresh team score and step status.
+  - Refactored `src/app/admin/monitor/page.tsx` to batch team scans in a single query instead of 50 individual N+1 calls.
+  - Room-filtered Realtime channels to eliminate WebSocket noise across events.
 
 ---
 
-## 📋 Pre-Event Checklist
+## 🟡 Active Work in Progress (HuntBase Theme Engine)
 
-Before the actual event:
-
-- [ ] **Create admin user** in Supabase
-- [ ] **Disable RLS** or configure proper policies
-- [ ] **Verify environment variables** in Vercel
-- [ ] **Create event** with correct times and duration
-- [ ] **Add all clues** with hint text
-- [ ] **Create teams** or use "Generate Teams"
-- [ ] **Generate QR codes** and print them
-- [ ] **Test complete flow** with 2 test players
-- [ ] **Test on actual mobile devices** (iOS + Android)
-- [ ] **Verify timer** is working correctly
-- [ ] **Test fake QRs** if using them
+| Feature | Target Component | Status | Notes |
+|---|---|:---:|---|
+| Theme Customizer UI | `src/app/admin/theme/page.tsx` | 🔨 In Progress | 5 presets, color pickers, mobile preview |
+| Dynamic Theme Engine | `src/contexts/ThemeContext.tsx` | 🔨 In Progress | Injects club tokens into Tailwind v4 `:root` |
+| Asset Storage Uploader | `src/app/api/admin/upload-asset/` | ✅ Complete | Multipart upload to `organization-assets` |
+| Automated E2E Smoke Test | `tests/e2e-smoke.spec.ts` | ⏳ Ready | Playwright automated test flow |
 
 ---
 
-## 💡 Tips for Debugging
+## 🧪 Device & Browser Verification Matrix
 
-### Check Vercel Logs
-
-1. Go to Vercel Dashboard → Your Project
-2. Click "Logs" tab
-3. Filter by function (e.g., `/api/scan`)
-4. Look for console.log outputs
-
-### Check Supabase Data
-
-1. Go to Supabase Dashboard → Table Editor
-2. Verify `team_clue_order` has entries after "Start Hunt"
-3. Verify `qr_codes` have correct `qr_token` values
-4. Make sure QR codes belong to the same event as teams
-
-### Test with Manual Input
-
-The scan page has a hidden "Can't use camera?" option:
-
-1. Click the button at bottom of scan page
-2. Enter QR token manually (from QR code filename)
-3. Useful for desktop testing
-
-### Common Issues
-
-| Problem            | Solution                               |
-| ------------------ | -------------------------------------- |
-| "Invalid QR code"  | QR token doesn't exist or wrong event  |
-| "Wrong QR code"    | Not this team's next clue              |
-| "Already scanned"  | Team already completed this clue       |
-| "Hunt not started" | Admin needs to click "Start Hunt"      |
-| "Time's up"        | Hunt timer expired                     |
+| Device / Browser | Target Capability | Verification Status |
+|---|---|:---:|
+| iOS Safari 17+ | Camera stream start & teardown | ✅ Verified |
+| iOS Safari 17+ | Native camera QR code URL redirect | ✅ Verified |
+| Android Chrome 120+ | Camera stream & haptic feedback | ✅ Verified |
+| Desktop Chrome / Firefox | Admin live monitoring WebSocket | ✅ Verified |
+| Supabase Pooler IPv4 | AWS Sydney transaction pooler connection | ✅ Verified (16/16 tests pass) |
 
 ---
 
-## 📞 Contact / Help
-
-If stuck, check:
-
-1. `TECHNICAL_DOCUMENTATION.md` - Full system docs
-2. `supabase/SETUP_GUIDE.md` - Database setup
-3. `supabase/schema.sql` - Table definitions
-4. Console errors in browser DevTools
-5. Vercel Function Logs
-
----
-
-## 📝 Contributors
-
-- Initial Development: @harsha
-- Bug Fixes (Jan 17-19): @SaiGurulnukurthi
-
----
-
-Good luck with the event! 🎯
+*GitHub Community GITAM - HuntBase Engineering Team*

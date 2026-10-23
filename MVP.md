@@ -1,320 +1,84 @@
-# Techscapades - Campus Treasure Hunt Platform
+# HuntBase - Multi-Tenant Campus Treasure Hunt Platform
 
-## MVP Specification
+## MVP & Architecture Specification
 
-A real-time campus treasure hunt platform where teams compete by scanning QR codes at various locations to progress through clues and earn points.
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | Next.js 16 (App Router), React, TypeScript |
-| **Styling** | Tailwind CSS, shadcn/ui components |
-| **Backend** | Next.js API Routes, Server Actions |
-| **Database** | Supabase (PostgreSQL) |
-| **Auth** | Supabase Auth (password-only) |
-| **Realtime** | Supabase Realtime subscriptions |
-| **Storage** | Supabase Storage (QR images) |
-| **Deployment** | Vercel (Frontend), Supabase (Backend) |
+HuntBase is a white-label, multi-tenant campus treasure hunt platform ("Wix/Kahoot for hunts") built by GitHub Community GITAM. Student clubs and campus organizations can independently launch customized, branded hunts with dynamic themes, randomized clues, anti-cheat QR validation, live sub-300ms monitoring, and real-time leaderboards.
 
 ---
 
-## Features
+## 🛠️ Tech Stack
 
-### ✅ Included in MVP
-
-- Admin creates and manages events
-- Admin bulk-creates team accounts (username + password)
-- Linear treasure hunt flow per team
-- Unique QR code per clue/location
-- Per-team randomized clue order
-- QR scan validation (order-enforced)
-- Live score & progress tracking (Supabase Realtime)
-- Admin dashboard (edit clues, scores, disqualify teams)
-- Downloadable QR images
-- Admin notes for clue answers (visible only to admins)
-
-### ❌ Intentionally Cut (for MVP)
-
-- Password reset
-- GPS/location validation
-- Public leaderboard screen
-- Multi-admin roles
-- Offline mode
+| Layer | Technology | Description |
+|---|---|---|
+| **Frontend** | Next.js 16 (App Router), React 19, TypeScript | Server Components, dynamic routes, fast hydration |
+| **Styling** | Tailwind CSS v4, shadcn/ui | CSS variable theme tokens, dark/light mode responsive |
+| **Backend** | Next.js API Routes, HttpOnly Cookies | Secure session middleware, administrative endpoints |
+| **Database** | Supabase (PostgreSQL 15+) | 12 tables, Row Level Security (RLS), ACID constraints |
+| **Auth** | Multi-Tier Cookie & Token Auth | Club host credentials + individual team passwords |
+| **Realtime** | Supabase Realtime (WebSockets) | Live monitoring with `REPLICA IDENTITY FULL` |
+| **Storage** | Supabase Storage (`organization-assets`) | Club logos, custom banners (5MB limit, CDN delivery) |
+| **QR Engine** | html5-qrcode & server qrcode | Native mobile camera scanner + server PNG/SVG batch generation |
 
 ---
 
-## Architecture
+## 🌟 Features
+
+### ✅ Core Platform Features
+- 🏢 **Multi-Tenant Club Isolation**: Each club operates within its isolated organization domain (`organization_id`).
+- 🎨 **White-Label Theme Engine**: Dynamic branding presets (*Cyber Matrix*, *Neon Kahoot*, *Parchment Quest*, *Arcade 80s*, *Minimalist Mono*), custom hex tokens, and asset uploads.
+- 🎲 **Anti-Crowding Round-Robin**: Clues are distributed across starting points so teams do not follow each other physically.
+- 📱 **Native Camera QR Scanner**: Zero-latency scanning with automatic `?token=` parameter extraction from native iOS/Android camera apps.
+- 🔒 **Zero DevTools Answer Leaks**: Clue locations and admin notes are stripped at the server layer (`/api/hunt/current-clue`).
+- ⏱️ **Synchronized Hunt Countdown**: Global timer with automatic lockouts when the hunt expires.
+- 💡 **Balanced Hint Economy**: Delayed hint reveals with automatic point deductions (10 points unassisted vs 5 points with hint).
+- 🎭 **Rickroll Decoy Traps**: Physical fake QR codes log scans into a live "Hall of Shame".
+- 📊 **Real-Time Host Dashboard**: Sub-300ms WebSocket updates tracking team progress, scan logs, and scores.
+
+---
+
+## 🏗️ Architecture
 
 ```
-Next.js (App Router) + Tailwind + shadcn/ui
+HuntBase Platform
 │
-├── Participant App (Mobile-first)
-│   ├── Login
-│   ├── Current Clue View
-│   ├── QR Scanner
-│   └── Progress View
+├── Participant Web App (Mobile-First)
+│   ├── /login                     (Team & event credentials)
+│   ├── /hunt                      (Current riddle & clues - secure API)
+│   ├── /scan                      (Native camera scanner with auto-redirect)
+│   └── /progress                  (Team status & completion lock)
 │
-├── Admin Dashboard
-│   ├── Event Management
-│   ├── Clue Management
-│   ├── Team Management
-│   ├── QR Code Generation
-│   ├── Live Monitoring
-│   └── Analytics
+├── Club Host Admin Dashboard
+│   ├── /admin/events              (Create & schedule hunts)
+│   ├── /admin/clues               (Riddles, locations & hints)
+│   ├── /admin/teams               (Bulk account generation & credentials)
+│   ├── /admin/qr-codes            (Batch QR generation & ZIP export)
+│   ├── /admin/theme               (Wix-style theme customizer & logo uploader)
+│   └── /admin/monitor             (Real-time live team board & map)
 │
 └── Supabase Backend
-    ├── Auth (password-only)
-    ├── Postgres (RLS enforced)
-    ├── Realtime (progress updates)
-    └── Storage (QR images)
+    ├── Master Schema              (supabase/schema.sql - 12 public tables)
+    ├── Row Level Security (RLS)   (Direct anon SELECT blocked on secret tables)
+    ├── Realtime Engine            (teams, events, scans, fake_qr_scans)
+    └── Storage Bucket             (organization-assets with 5MB upload limit)
 ```
 
 ---
 
-## Data Model
+## 🗄️ Database Tables (12 Public Tables)
 
-### `events`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| name | TEXT | Event name |
-| start_time | TIMESTAMPTZ | Event start |
-| end_time | TIMESTAMPTZ | Event end |
-| is_active | BOOLEAN | Whether event is live |
-| created_at | TIMESTAMPTZ | Creation timestamp |
-
-### `teams`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| event_id | UUID (FK) | Reference to event |
-| team_name | TEXT | Display name |
-| username | TEXT | Login username |
-| password_hash | TEXT | Hashed password |
-| score | INTEGER | Current score |
-| is_disqualified | BOOLEAN | DQ status |
-| current_step | INTEGER | Current clue index |
-| is_admin | BOOLEAN | Admin flag |
-| created_at | TIMESTAMPTZ | Creation timestamp |
-
-### `clues`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| event_id | UUID (FK) | Reference to event |
-| step_number | INTEGER | Order in sequence |
-| clue_text | TEXT | The riddle/clue |
-| location_name | TEXT | Optional location hint |
-| admin_notes | TEXT | Answer/hints (admin only) |
-| created_at | TIMESTAMPTZ | Creation timestamp |
-
-### `qr_codes`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| event_id | UUID (FK) | Reference to event |
-| clue_id | UUID (FK) | Reference to clue |
-| qr_token | TEXT | Unique scannable token |
-| created_at | TIMESTAMPTZ | Creation timestamp |
-
-### `team_clue_order`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| team_id | UUID (FK) | Reference to team |
-| clue_id | UUID (FK) | Reference to clue |
-| step_index | INTEGER | Team's clue order |
-
-### `scans`
-| Column | Type | Description |
-|--------|------|-------------|
-| id | UUID (PK) | Unique identifier |
-| team_id | UUID (FK) | Reference to team |
-| clue_id | UUID (FK) | Reference to clue |
-| qr_code_id | UUID (FK) | Reference to QR code |
-| scanned_at | TIMESTAMPTZ | Scan timestamp |
+1. `organizations`: Tenant clubs (slug, name, verified status).
+2. `host_users`: Club organizers and super-admins with hashed credentials.
+3. `theme_configs`: Club visual identity (colors, fonts, banners, logos).
+4. `password_reset_tokens`: Secure token management for host recovery.
+5. `events`: Hunt events with start/end timestamps and hint delay intervals.
+6. `teams`: Competing groups with unique usernames, scores, and status.
+7. `team_members`: Individual player roster per team.
+8. `clues`: Hunt riddles, point values, hints, and secret coordinates.
+9. `qr_codes`: Encrypted tokens linked to clues and physical locations.
+10. `team_clue_order`: Randomized round-robin sequence per team.
+11. `scans`: Validated checkpoint logs with timestamps and score delta.
+12. `fake_qr_scans`: Decoy scan records feeding the Hall of Shame.
 
 ---
 
-## Game Flow
-
-### Team Experience
-
-```
-1. Login
-   └── Team enters username + password
-   
-2. View Current Clue
-   └── See riddle/clue text for current step
-   
-3. Find Location
-   └── Solve clue and go to location
-   
-4. Scan QR Code
-   └── Use camera to scan QR at location
-   
-5. Validation
-   ├── ✓ Correct: Score increases, next clue revealed
-   └── ✗ Wrong: Error message, try again
-   
-6. Repeat until all clues completed
-   
-7. Victory!
-   └── Team sees completion status
-```
-
-### QR Scan Validation Logic
-
-1. Team scans QR code
-2. Backend fetches `qr_token`
-3. Validation checks:
-   - Event is active
-   - Team is not disqualified
-   - Token matches **expected next clue** for this team
-4. If valid:
-   - Insert scan record
-   - Increment score
-   - Advance to next step
-5. If invalid:
-   - Return appropriate error message
-
-**No duplicate scans allowed** (unique constraint on team + clue).
-
----
-
-## Admin Dashboard Sections
-
-### 1. Events
-- Create/edit events
-- Set start & end times
-- Activate/deactivate events
-
-### 2. Clues
-- Add/edit/delete clues
-- Reorder clue sequence
-- Add admin notes (answers)
-
-### 3. Teams
-- Bulk-generate team accounts
-- Auto-assign randomized clue order
-- View/manage credentials
-
-### 4. QR Codes
-- Auto-generate QR for each clue
-- Download QR codes
-- Print-ready format
-
-### 5. Live Monitor
-- Real-time team progress
-- Score tracking
-- Last scan timestamps
-- Adjust scores manually
-- Disqualify teams
-- End event instantly
-
----
-
-## Auth Strategy
-
-- **Password-only authentication** via Supabase Auth
-- Admin generates credentials:
-  - Username: `TEAM_<event>_<number>`
-  - Random 8-10 character password
-- Credentials exportable as needed
-- Teams can log in from multiple devices
-
-### Row Level Security (RLS)
-- Teams can read/write **only their own row**
-- Admin operations use service role key to bypass RLS
-
----
-
-## Realtime Updates
-
-### Subscriptions
-- `teams` table changes
-- `scans` table inserts
-
-### Admin View
-- Sees all teams in real-time
-
-### Team View
-- Sees only their own progress updates
-
-**Expected latency:** <500ms (suitable for campus WiFi)
-
----
-
-## API Routes
-
-| Route | Method | Description |
-|-------|--------|-------------|
-| `/api/auth/login` | POST | Team login |
-| `/api/auth/admin-login` | POST | Admin login |
-| `/api/scan` | POST | QR code validation |
-| `/api/admin/events` | GET/POST/PUT/DELETE | Event CRUD |
-| `/api/admin/clues` | GET/POST/PUT/DELETE | Clue CRUD |
-| `/api/admin/teams` | GET/DELETE | Team management |
-| `/api/admin/teams/generate` | POST | Bulk team generation |
-| `/api/admin/qr/generate` | POST | QR code generation |
-
----
-
-## Environment Variables
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-```
-
----
-
-## Folder Structure
-
-```
-src/
-├── app/
-│   ├── (auth)/
-│   │   ├── login/
-│   │   └── admin-login/
-│   ├── admin/
-│   │   ├── events/
-│   │   ├── clues/
-│   │   ├── teams/
-│   │   ├── qr-codes/
-│   │   └── monitor/
-│   ├── hunt/
-│   ├── scan/
-│   └── api/
-│       ├── auth/
-│       ├── scan/
-│       └── admin/
-├── components/
-│   └── ui/
-├── lib/
-│   ├── supabase/
-│   ├── types.ts
-│   └── utils/
-└── styles/
-```
-
----
-
-## Getting Started
-
-1. Clone the repository
-2. Install dependencies: `npm install`
-3. Set up Supabase project and run schema SQL
-4. Configure environment variables
-5. Run development server: `npm run dev`
-6. Access admin at `/admin-login`
-
----
-
-## License
-
-MIT
+*Authored and maintained by GitHub Community GITAM*
