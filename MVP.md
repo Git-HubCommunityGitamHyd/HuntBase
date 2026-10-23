@@ -2,7 +2,7 @@
 
 ## MVP & Architecture Specification
 
-HuntBase is a white-label, multi-tenant campus treasure hunt platform ("Wix/Kahoot for hunts") built by GitHub Community GITAM. Student clubs and campus organizations can independently launch customized, branded hunts with dynamic themes, randomized clues, anti-cheat QR validation, live sub-300ms monitoring, and real-time leaderboards.
+HuntBase is a white-label, multi-tenant campus treasure hunt platform built by GitHub Community GITAM. Student clubs and campus organizations can independently launch customized, branded hunts with dynamic themes, randomized clues, anti-cheat QR validation, live sub-300ms monitoring, and real-time leaderboards.
 
 ---
 
@@ -25,7 +25,7 @@ HuntBase is a white-label, multi-tenant campus treasure hunt platform ("Wix/Kaho
 
 ### ✅ Core Platform Features
 - 🏢 **Multi-Tenant Club Isolation**: Each club operates within its isolated organization domain (`organization_id`).
-- 🎨 **White-Label Theme Engine**: Dynamic branding presets (*Cyber Matrix*, *Neon Kahoot*, *Parchment Quest*, *Arcade 80s*, *Minimalist Mono*), custom hex tokens, and asset uploads.
+- 🎨 **White-Label Theme Engine**: Dynamic branding presets (*Cyber Matrix*, *Neon Pulse*, *Parchment Quest*, *Arcade 80s*, *Minimalist Mono*), custom hex tokens, and asset uploads.
 - 🎲 **Anti-Crowding Round-Robin**: Clues are distributed across starting points so teams do not follow each other physically.
 - 📱 **Native Camera QR Scanner**: Zero-latency scanning with automatic `?token=` parameter extraction from native iOS/Android camera apps.
 - 🔒 **Zero DevTools Answer Leaks**: Clue locations and admin notes are stripped at the server layer (`/api/hunt/current-clue`).
@@ -52,7 +52,7 @@ HuntBase Platform
 │   ├── /admin/clues               (Riddles, locations & hints)
 │   ├── /admin/teams               (Bulk account generation & credentials)
 │   ├── /admin/qr-codes            (Batch QR generation & ZIP export)
-│   ├── /admin/theme               (Wix-style theme customizer & logo uploader)
+│   ├── /admin/theme               (Theme customizer & logo uploader)
 │   └── /admin/monitor             (Real-time live team board & map)
 │
 └── Supabase Backend

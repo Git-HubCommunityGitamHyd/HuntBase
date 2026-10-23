@@ -2,7 +2,7 @@
 
 export type ThemePreset = 
   | 'cyber-matrix'
-  | 'neon-kahoot'
+  | 'neon-pulse'
   | 'parchment-quest'
   | 'arcade-80s'
   | 'minimalist-mono'

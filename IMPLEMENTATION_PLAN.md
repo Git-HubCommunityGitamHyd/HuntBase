@@ -35,11 +35,11 @@
 
 ## 🔨 Current Sprint: Club Branding & Theme Customizer
 
-### Phase 4: "Wix for Hunts" Dynamic Theme Engine
+### Phase 4: Dynamic Theme Engine & Club Customizer
 - [ ] Theme Customizer page in Admin Dashboard (`src/app/admin/theme/page.tsx`)
 - [ ] 5 Pre-configured aesthetic presets:
   - *Cyber Matrix* (Green & Dark Mode)
-  - *Neon Kahoot* (Vibrant Purple & Electric Cyan)
+  - *Neon Pulse* (Vibrant Purple & Electric Cyan)
   - *Parchment Quest* (Warm Amber & Antique Brass)
   - *Arcade 80s* (Retro Magenta & Sunset Gold)
   - *Minimalist Mono* (Clean Slate & Monochrome)
