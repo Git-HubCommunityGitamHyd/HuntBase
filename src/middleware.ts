@@ -5,9 +5,20 @@ import { decodeSession } from "@/lib/auth/session";
 export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
-    // Check for admin routes protection
-    const isAdminRoute = pathname.startsWith("/admin");
-    const isSuperAdminRoute = pathname.startsWith("/super-admin");
+    // 1. Exclude public admin login page from route interception
+    if (pathname === "/admin-login") {
+        const sessionCookie = request.cookies.get("huntbase_session");
+        const session = sessionCookie?.value ? decodeSession(sessionCookie.value) : null;
+        // If already logged in, redirect straight into admin dashboard
+        if (session) {
+            return NextResponse.redirect(new URL("/admin", request.url));
+        }
+        return NextResponse.next();
+    }
+
+    // 2. Check for protected admin routes (/admin, /admin/*, /super-admin, /api/admin/*)
+    const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
+    const isSuperAdminRoute = pathname === "/super-admin" || pathname.startsWith("/super-admin/");
     const isAdminApiRoute = pathname.startsWith("/api/admin");
 
     if (isAdminRoute || isSuperAdminRoute || isAdminApiRoute) {
