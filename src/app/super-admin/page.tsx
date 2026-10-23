@@ -232,9 +232,7 @@ export default function SuperAdminPage() {
                                         <div className="flex justify-between items-start gap-2">
                                             <div>
                                                 <CardTitle className="text-base font-bold text-white">{club.name}</CardTitle>
-                                                <CardDescription className="text-xs text-zinc-400 font-mono mt-0.5">
-                                                    /{club.slug}
-                                                </CardDescription>
+                                                
                                             </div>
                                             <Badge variant="outline" className="border-amber-500/30 text-amber-400 text-[10px]">
                                                 Pending Review
@@ -302,7 +300,7 @@ export default function SuperAdminPage() {
                             <thead className="bg-zinc-900/80 border-b border-zinc-800 text-zinc-400 uppercase tracking-wider text-[11px]">
                                 <tr>
                                     <th className="py-3 px-4">Club Name</th>
-                                    <th className="py-3 px-4">Slug</th>
+                                    
                                     <th className="py-3 px-4">Lead Organizer</th>
                                     <th className="py-3 px-4">Events</th>
                                     <th className="py-3 px-4">Status</th>
@@ -324,8 +322,7 @@ export default function SuperAdminPage() {
                                                     </span>
                                                 )}
                                             </td>
-                                            <td className="py-3 px-4 font-mono text-zinc-400">/{club.slug}</td>
-                                            <td className="py-3 px-4 text-zinc-300">
+                                                                                        <td className="py-3 px-4 text-zinc-300">
                                                 <div className="flex items-center gap-1.5 flex-wrap">
                                                     <span className="font-medium text-white">{leadOrganizer?.full_name || "N/A"}</span>
                                                     {leadOrganizer?.username && (

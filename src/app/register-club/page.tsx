@@ -10,8 +10,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function RegisterClubPage() {
     const [clubName, setClubName] = useState("");
-    const [slug, setSlug] = useState("");
-    const [isSlugCustomized, setIsSlugCustomized] = useState(false);
     const [contactEmail, setContactEmail] = useState("");
     const [fullName, setFullName] = useState("");
     const [username, setUsername] = useState("");
@@ -21,19 +19,6 @@ export default function RegisterClubPage() {
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState("");
     const [isSuccess, setIsSuccess] = useState(false);
-
-    // Auto-generate slug from club name unless user edited it manually
-    const handleClubNameChange = (val: string) => {
-        setClubName(val);
-        if (!isSlugCustomized) {
-            const autoSlug = val
-                .toLowerCase()
-                .trim()
-                .replace(/[^a-z0-9]+/g, "-")
-                .replace(/^-+|-+$/g, "");
-            setSlug(autoSlug);
-        }
-    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -46,7 +31,6 @@ export default function RegisterClubPage() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     club_name: clubName,
-                    slug,
                     contact_email: contactEmail,
                     full_name: fullName,
                     username,
@@ -89,8 +73,8 @@ export default function RegisterClubPage() {
                     <CardContent className="space-y-5">
                         <div className="rounded-lg bg-zinc-900/80 p-4 border border-zinc-800 text-left space-y-2 text-xs">
                             <div className="flex justify-between">
-                                <span className="text-zinc-500">Club Slug:</span>
-                                <span className="text-zinc-200 font-mono">/{slug}</span>
+                                <span className="text-zinc-500">Club Name:</span>
+                                <span className="text-zinc-200 font-medium">{clubName}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-zinc-500">Lead Organizer:</span>
@@ -98,7 +82,7 @@ export default function RegisterClubPage() {
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-zinc-500">Login Username:</span>
-                                <span className="text-zinc-200 font-mono">{username}</span>
+                                <span className="text-zinc-200 font-mono">@{username}</span>
                             </div>
                             <div className="flex justify-between">
                                 <span className="text-zinc-500">Status:</span>
@@ -107,7 +91,7 @@ export default function RegisterClubPage() {
                         </div>
 
                         <p className="text-xs text-zinc-500">
-                            Once approved, you will be able to sign in and immediately launch customized treasure hunts.
+                            Once approved, you will be able to sign in and immediately launch campus hunts for your club.
                         </p>
 
                         <div className="pt-2">
@@ -134,7 +118,7 @@ export default function RegisterClubPage() {
                         Register Your Campus Club
                     </CardTitle>
                     <CardDescription className="text-zinc-400 text-sm">
-                        Create a white-label domain on HuntBase to host branded treasure hunts with automated clues and live leaderboards.
+                        Create an account on HuntBase to host branded treasure hunts with automated clues and live leaderboards.
                     </CardDescription>
                 </CardHeader>
 
@@ -146,7 +130,7 @@ export default function RegisterClubPage() {
                             </Alert>
                         )}
 
-                        {/* Section: Club Identity */}
+                        {/* Section 1: Club Identity */}
                         <div className="space-y-3 pt-2">
                             <h3 className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">
                                 1. Club Details
@@ -159,30 +143,10 @@ export default function RegisterClubPage() {
                                     type="text"
                                     placeholder="e.g. IEEE Student Branch"
                                     value={clubName}
-                                    onChange={(e) => handleClubNameChange(e.target.value)}
+                                    onChange={(e) => setClubName(e.target.value)}
                                     required
                                     className="bg-zinc-900 border-white/10 text-white placeholder:text-zinc-600 focus:border-white/30 text-sm"
                                 />
-                            </div>
-
-                            <div className="space-y-1.5">
-                                <Label htmlFor="slug" className="text-xs text-zinc-300">Club URL Slug *</Label>
-                                <div className="flex items-center rounded-md border border-white/10 bg-zinc-900 px-3 py-1">
-                                    <span className="text-xs text-zinc-500 mr-1 select-none">huntbase.campus/</span>
-                                    <input
-                                        id="slug"
-                                        type="text"
-                                        placeholder="ieee-gitam"
-                                        value={slug}
-                                        onChange={(e) => {
-                                            setSlug(e.target.value);
-                                            setIsSlugCustomized(true);
-                                        }}
-                                        required
-                                        className="bg-transparent text-xs text-white font-mono focus:outline-none flex-1"
-                                    />
-                                </div>
-                                <p className="text-[11px] text-zinc-500">Lowercase letters, numbers, and dashes only.</p>
                             </div>
 
                             <div className="space-y-1.5">
@@ -198,7 +162,7 @@ export default function RegisterClubPage() {
                             </div>
                         </div>
 
-                        {/* Section: Lead Organizer Credentials */}
+                        {/* Section 2: Lead Organizer Credentials */}
                         <div className="space-y-3 pt-4 border-t border-white/10">
                             <h3 className="text-xs font-semibold uppercase text-zinc-400 tracking-wider">
                                 2. Lead Organizer Account

@@ -7,7 +7,6 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const {
             club_name,
-            slug,
             contact_email,
             full_name,
             username,
@@ -16,18 +15,9 @@ export async function POST(request: NextRequest) {
         } = body;
 
         // Basic validation
-        if (!club_name || !slug || !contact_email || !full_name || !username || !password) {
+        if (!club_name || !contact_email || !full_name || !username || !password) {
             return NextResponse.json(
                 { success: false, message: "All required fields must be filled" },
-                { status: 400 }
-            );
-        }
-
-        // Slug sanitization: lowercase, alphanumeric and hyphens only
-        const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-");
-        if (cleanSlug.length < 3) {
-            return NextResponse.json(
-                { success: false, message: "Club slug must be at least 3 characters long" },
                 { status: 400 }
             );
         }
@@ -42,21 +32,7 @@ export async function POST(request: NextRequest) {
 
         const supabase = createAdminClient();
 
-        // 1. Check if slug already exists
-        const { data: existingOrg } = await supabase
-            .from("organizations")
-            .select("id")
-            .eq("slug", cleanSlug)
-            .maybeSingle();
-
-        if (existingOrg) {
-            return NextResponse.json(
-                { success: false, message: "A club with this slug already exists. Please choose a different one." },
-                { status: 409 }
-            );
-        }
-
-        // 2. Check if username or email already exists in host_users
+        // 1. Check if username or email already exists in host_users
         const { data: existingUser } = await supabase
             .from("host_users")
             .select("id")
@@ -70,6 +46,24 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // 2. Generate a clean unique internal slug for database constraints
+        const baseSlug = (body.slug || club_name)
+            .toLowerCase()
+            .trim()
+            .replace(/[^a-z0-9]+/g, "-")
+            .replace(/^-+|-+$/g, "") || "club";
+
+        let cleanSlug = baseSlug;
+        const { data: existingSlug } = await supabase
+            .from("organizations")
+            .select("id")
+            .eq("slug", cleanSlug)
+            .maybeSingle();
+
+        if (existingSlug) {
+            cleanSlug = `${baseSlug}-${Math.random().toString(36).substring(2, 6)}`;
+        }
+
         // 3. Create unverified organization
         const { data: newOrg, error: orgError } = await supabase
             .from("organizations")
@@ -78,7 +72,7 @@ export async function POST(request: NextRequest) {
                 slug: cleanSlug,
                 contact_email: contact_email.trim(),
                 description: description ? description.trim() : null,
-                is_verified: false, // Requires Super Admin approval!
+                is_verified: false, // Requires Super Admin approval
             })
             .select()
             .single();
@@ -107,21 +101,21 @@ export async function POST(request: NextRequest) {
 
         if (userError) {
             console.error("Host user creation error:", userError);
-            // Rollback organization
+            // Rollback organization creation
             await supabase.from("organizations").delete().eq("id", newOrg.id);
             return NextResponse.json(
-                { success: false, message: "Failed to create organizer credentials" },
+                { success: false, message: "Failed to create organizer account" },
                 { status: 500 }
             );
         }
 
-        // 5. Seed default theme config
+        // 5. Initialize default theme config for this organization
         await supabase.from("theme_configs").insert({
             organization_id: newOrg.id,
-            preset: "cyber-matrix",
+            preset_id: "cyber-matrix",
             primary_color: "#22c55e",
             accent_color: "#10b981",
-            background_color: "#09090b",
+            background_color: "#0a0a0c",
             card_color: "#18181b",
             text_color: "#fafafa",
             border_radius: "0.5rem",
@@ -129,18 +123,16 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: "Club registration submitted successfully! Your application is pending review by the Super Admin.",
+            message: "Club registration submitted successfully! Awaiting super admin review.",
             club: {
                 id: newOrg.id,
                 name: newOrg.name,
-                slug: newOrg.slug,
-                is_verified: false,
             },
         });
     } catch (error) {
         console.error("Club registration error:", error);
         return NextResponse.json(
-            { success: false, message: "Internal server error during registration" },
+            { success: false, message: "Internal server error" },
             { status: 500 }
         );
     }
