@@ -35,41 +35,34 @@ export default function Home() {
           </div>
         </div>
 
-        {/* EPOCH Badge */}
-        <div className="flex items-center justify-center gap-2">
-          <span className="px-3 py-1 text-xs font-medium text-gray-400 border border-white/20 rounded-full">
-            Part of EPOCH 4.0
-          </span>
-        </div>
-
         {/* Title */}
-        <h1 className="text-5xl md:text-6xl font-bold text-white">
-          Techscapades 4.0
+        <h1 className="text-5xl md:text-6xl font-bold text-white tracking-tight">
+          HuntBase 🎯
         </h1>
 
         {/* Subtitle */}
-        <p className="text-xl text-gray-400 max-w-md mx-auto">
-          Explore, solve riddles, scan QR codes, and race against other teams in this Tech adventure!
+        <p className="text-xl text-gray-400 max-w-md mx-auto leading-relaxed">
+          The multi-tenant campus treasure hunt platform. Solve clues, scan QR codes, and race in real-time!
         </p>
 
         {/* CTA Buttons */}
         <div className="flex flex-col sm:flex-row gap-4 justify-center pt-4">
           <Link href="/register">
-            <button className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-gray-200 text-black font-semibold rounded-xl text-lg">
-              Register Now →
+            <button className="w-full sm:w-auto px-8 py-4 bg-white hover:bg-gray-200 text-black font-semibold rounded-xl text-lg transition-colors">
+              Register Team →
             </button>
           </Link>
           <Link href="/login">
-            <button className="w-full sm:w-auto px-8 py-4 bg-transparent hover:bg-white/10 text-white font-semibold rounded-xl border border-white/30 text-lg">
-              Already Registered? Login
+            <button className="w-full sm:w-auto px-8 py-4 bg-transparent hover:bg-white/10 text-white font-semibold rounded-xl border border-white/30 text-lg transition-colors">
+              Player Login
             </button>
           </Link>
         </div>
 
         {/* Admin Link */}
         <div className="pt-2">
-          <Link href="/admin-login" className="text-sm text-gray-500 hover:text-white">
-            Admin Login →
+          <Link href="/admin/events" className="text-sm text-gray-500 hover:text-white transition-colors">
+            Admin Dashboard →
           </Link>
         </div>
       </div>
@@ -80,7 +73,7 @@ export default function Home() {
           href="https://github.com/Git-HubCommunityGitamHyd"
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 text-sm text-gray-500 hover:text-white"
+          className="flex items-center justify-center gap-2 text-sm text-gray-500 hover:text-white transition-colors"
         >
           <svg
             viewBox="0 0 16 16"

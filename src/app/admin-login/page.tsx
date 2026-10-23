@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,55 @@ export default function AdminLoginPage() {
     const [password, setPassword] = useState("");
     const [error, setError] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [isCheckingSession, setIsCheckingSession] = useState(true);
+
+    // Auto-detect existing active session and redirect straight to dashboard
+    useEffect(() => {
+        let isMounted = true;
+
+        async function checkActiveSession() {
+            // 1. Check local storage
+            const storedAdmin = localStorage.getItem("admin");
+            if (storedAdmin) {
+                try {
+                    JSON.parse(storedAdmin);
+                    if (isMounted) {
+                        router.replace("/admin/events");
+                        return;
+                    }
+                } catch {
+                    localStorage.removeItem("admin");
+                }
+            }
+
+            // 2. Check server session cookie
+            try {
+                const res = await fetch("/api/auth/me");
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data?.success && data?.admin) {
+                        localStorage.setItem("admin", JSON.stringify(data.admin));
+                        if (isMounted) {
+                            router.replace("/admin/events");
+                            return;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error("Session check error:", err);
+            }
+
+            if (isMounted) {
+                setIsCheckingSession(false);
+            }
+        }
+
+        checkActiveSession();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [router]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -32,7 +81,7 @@ export default function AdminLoginPage() {
 
             if (data.success) {
                 localStorage.setItem("admin", JSON.stringify(data.admin));
-                router.push("/admin");
+                router.push("/admin/events");
             } else {
                 setError(data.message || "Invalid credentials");
             }
@@ -42,6 +91,14 @@ export default function AdminLoginPage() {
             setIsLoading(false);
         }
     };
+
+    if (isCheckingSession) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-black">
+                <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-white"></div>
+            </div>
+        );
+    }
 
     return (
         <div className="min-h-screen flex items-center justify-center bg-black p-4">
@@ -64,10 +121,10 @@ export default function AdminLoginPage() {
                         </svg>
                     </div>
                     <CardTitle className="text-2xl font-bold text-white">
-                        Admin Dashboard
+                        HuntBase Admin
                     </CardTitle>
                     <CardDescription className="text-gray-400">
-                        Enter admin credentials to manage events
+                        Enter your club host credentials to manage events
                     </CardDescription>
                 </CardHeader>
 
@@ -80,7 +137,7 @@ export default function AdminLoginPage() {
                         )}
 
                         <div className="space-y-2">
-                            <Label htmlFor="username" className="text-gray-300">Username</Label>
+                            <Label htmlFor="username" className="text-gray-300">Username or Email</Label>
                             <Input
                                 id="username"
                                 type="text"
@@ -107,35 +164,23 @@ export default function AdminLoginPage() {
 
                         <Button
                             type="submit"
-                            className="w-full bg-white hover:bg-gray-200 text-black font-semibold py-3"
+                            className="w-full bg-white hover:bg-gray-200 text-black font-semibold h-11"
                             disabled={isLoading}
                         >
                             {isLoading ? (
-                                <span className="flex items-center gap-2">
-                                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                                    </svg>
-                                    Authenticating...
-                                </span>
+                                <div className="flex items-center gap-2">
+                                    <div className="animate-spin rounded-full h-4 w-4 border-2 border-black border-t-transparent"></div>
+                                    <span>Signing in...</span>
+                                </div>
                             ) : (
-                                "Access Dashboard"
+                                "Sign In"
                             )}
                         </Button>
                     </form>
 
-                    <div className="mt-6 flex flex-col items-center gap-2">
-                        <Link
-                            href="/login"
-                            className="text-sm text-gray-500 hover:text-white"
-                        >
-                            ← Team Login
-                        </Link>
-                        <Link
-                            href="/"
-                            className="text-sm text-gray-600 hover:text-white"
-                        >
-                            Back to Home
+                    <div className="mt-6 text-center">
+                        <Link href="/" className="text-sm text-gray-400 hover:text-white">
+                            ← Back to Home
                         </Link>
                     </div>
                 </CardContent>
