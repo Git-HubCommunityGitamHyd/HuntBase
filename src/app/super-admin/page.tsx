@@ -326,8 +326,15 @@ export default function SuperAdminPage() {
                                             </td>
                                             <td className="py-3 px-4 font-mono text-zinc-400">/{club.slug}</td>
                                             <td className="py-3 px-4 text-zinc-300">
-                                                <div>{leadOrganizer?.full_name || "N/A"}</div>
-                                                <div className="text-[10px] text-zinc-500 font-mono">{leadOrganizer?.email}</div>
+                                                <div className="flex items-center gap-1.5 flex-wrap">
+                                                    <span className="font-medium text-white">{leadOrganizer?.full_name || "N/A"}</span>
+                                                    {leadOrganizer?.username && (
+                                                        <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
+                                                            @{leadOrganizer.username}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <div className="text-[10px] text-zinc-500 font-mono mt-0.5">{leadOrganizer?.email}</div>
                                             </td>
                                             <td className="py-3 px-4 text-zinc-300 font-mono">
                                                 {club.events?.length || 0} hunts
