@@ -2,6 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { hashPassword } from "@/lib/utils/helpers";
 
+// Strip ASCII control and NUL characters (0x00-0x1F, 0x7F)
+function stripControlChars(val: unknown): string {
+    if (typeof val !== "string") return "";
+    return val.replace(/[\x00-\x1F\x7F]/g, "");
+}
+
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -14,16 +20,46 @@ export async function POST(request: NextRequest) {
             description,
         } = body;
 
+        const cleanClubName = stripControlChars(club_name).trim();
+        const cleanEmail = stripControlChars(contact_email).trim();
+        const cleanFullName = stripControlChars(full_name).trim();
+        const cleanUsername = stripControlChars(username).trim();
+        const cleanDescription = description ? stripControlChars(description).trim() : null;
+
         // Basic validation
-        if (!club_name || !contact_email || !full_name || !username || !password) {
+        if (!cleanClubName || !cleanEmail || !cleanFullName || !cleanUsername || !password) {
             return NextResponse.json(
                 { success: false, message: "All required fields must be filled" },
                 { status: 400 }
             );
         }
 
+        // Club name length check (max 100 chars)
+        if (cleanClubName.length > 100) {
+            return NextResponse.json(
+                { success: false, message: "Club name must not exceed 100 characters" },
+                { status: 400 }
+            );
+        }
+
+        // Description length check (max 500 chars)
+        if (cleanDescription && cleanDescription.length > 500) {
+            return NextResponse.json(
+                { success: false, message: "Description must not exceed 500 characters" },
+                { status: 400 }
+            );
+        }
+
+        // Username validation: max 30 chars, alphanumeric + underscore only
+        if (cleanUsername.length > 30 || !/^[a-zA-Z0-9_]+$/.test(cleanUsername)) {
+            return NextResponse.json(
+                { success: false, message: "Username must be 30 characters or fewer and contain only alphanumeric characters and underscores" },
+                { status: 400 }
+            );
+        }
+
         // Password length check
-        if (password.length < 6) {
+        if (typeof password !== "string" || password.length < 6) {
             return NextResponse.json(
                 { success: false, message: "Password must be at least 6 characters long" },
                 { status: 400 }
@@ -36,7 +72,7 @@ export async function POST(request: NextRequest) {
         const { data: existingUser } = await supabase
             .from("host_users")
             .select("id")
-            .or(`username.eq.${username.trim()},email.eq.${contact_email.trim()}`)
+            .or(`username.eq.${cleanUsername},email.eq.${cleanEmail}`)
             .maybeSingle();
 
         if (existingUser) {
@@ -47,7 +83,7 @@ export async function POST(request: NextRequest) {
         }
 
         // 2. Generate a clean unique internal slug for database constraints
-        const baseSlug = (body.slug || club_name)
+        const baseSlug = (body.slug ? stripControlChars(body.slug) : cleanClubName)
             .toLowerCase()
             .trim()
             .replace(/[^a-z0-9]+/g, "-")
@@ -68,10 +104,10 @@ export async function POST(request: NextRequest) {
         const { data: newOrg, error: orgError } = await supabase
             .from("organizations")
             .insert({
-                name: club_name.trim(),
+                name: cleanClubName,
                 slug: cleanSlug,
-                contact_email: contact_email.trim(),
-                description: description ? description.trim() : null,
+                contact_email: cleanEmail,
+                description: cleanDescription,
                 is_verified: false, // Requires Super Admin approval
             })
             .select()
@@ -91,10 +127,10 @@ export async function POST(request: NextRequest) {
             .from("host_users")
             .insert({
                 organization_id: newOrg.id,
-                email: contact_email.trim(),
-                username: username.trim(),
+                email: cleanEmail,
+                username: cleanUsername,
                 password_hash: passwordHash,
-                full_name: full_name.trim(),
+                full_name: cleanFullName,
                 role: "club_admin",
                 is_active: true,
             });

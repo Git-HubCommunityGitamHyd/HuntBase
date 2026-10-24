@@ -10,18 +10,22 @@ export function middleware(request: NextRequest) {
         return NextResponse.next();
     }
 
-    // 2. Check for protected admin routes (/admin, /admin/*, /super-admin, /api/admin/*)
-    const isAdminRoute = pathname === "/admin" || pathname.startsWith("/admin/");
-    const isSuperAdminRoute = pathname === "/super-admin" || pathname.startsWith("/super-admin/");
-    const isAdminApiRoute = pathname.startsWith("/api/admin");
+    // 2. Check for protected admin and super-admin routes
+    const isSuperAdminPageRoute = pathname === "/super-admin" || pathname.startsWith("/super-admin/");
+    const isSuperAdminApiRoute = pathname === "/api/super-admin" || pathname.startsWith("/api/super-admin/");
+    const isSuperAdminRoute = isSuperAdminPageRoute || isSuperAdminApiRoute;
 
-    if (isAdminRoute || isSuperAdminRoute || isAdminApiRoute) {
+    const isAdminPageRoute = pathname === "/admin" || pathname.startsWith("/admin/");
+    const isAdminApiRoute = pathname === "/api/admin" || pathname.startsWith("/api/admin/");
+    const isAdminRoute = isAdminPageRoute || isAdminApiRoute;
+
+    if (isAdminRoute || isSuperAdminRoute) {
         const sessionCookie = request.cookies.get("huntbase_session");
         const session = sessionCookie?.value ? decodeSession(sessionCookie.value) : null;
 
         // If not authenticated
         if (!session) {
-            if (isAdminApiRoute) {
+            if (isSuperAdminApiRoute || isAdminApiRoute) {
                 return NextResponse.json(
                     { success: false, message: "Unauthorized: Admin session required" },
                     { status: 401 }
@@ -34,7 +38,26 @@ export function middleware(request: NextRequest) {
 
         // Verify super_admin role for super-admin routes
         if (isSuperAdminRoute && session.role !== "super_admin") {
+            if (isSuperAdminApiRoute) {
+                return NextResponse.json(
+                    { success: false, message: "Forbidden: Super Admin access required" },
+                    { status: 403 }
+                );
+            }
             return NextResponse.redirect(new URL("/admin", request.url));
+        }
+
+        // Verify super_admin or club_admin role for admin routes
+        if (isAdminRoute && session.role !== "super_admin" && session.role !== "club_admin") {
+            if (isAdminApiRoute) {
+                return NextResponse.json(
+                    { success: false, message: "Forbidden: Admin access required" },
+                    { status: 403 }
+                );
+            }
+            const loginUrl = new URL("/admin-login", request.url);
+            loginUrl.searchParams.set("redirect", pathname);
+            return NextResponse.redirect(loginUrl);
         }
 
         // Inject verified tenant and user info into headers for downstream handlers

@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -220,6 +221,11 @@ export default function CluesPage() {
                             <DialogTitle className="text-white">
                                 {editingClue ? "Edit Clue" : "Add New Clue"}
                             </DialogTitle>
+                            <DialogDescription className="text-gray-400 text-sm">
+                                {editingClue
+                                    ? "Update clue text, hint, and secret location for this step."
+                                    : "Enter the riddle, optional hint, and answer location for this step."}
+                            </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {error && (

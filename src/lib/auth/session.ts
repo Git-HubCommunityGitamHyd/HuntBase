@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import crypto from "crypto";
+
 export interface SessionUser {
     id: string;
     username: string;
@@ -11,23 +13,61 @@ export interface SessionUser {
 const SESSION_COOKIE_NAME = "huntbase_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
 
+const SESSION_SECRET =
+    process.env.SESSION_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    "huntbase-secure-default-secret-salt";
+
+function getHmacSignature(payload: string): string {
+    return crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+}
+
 /**
  * Encodes session data to a secure base64 payload.
+ * Token format: <base64Payload>.<hmacSignature>
  */
 export function encodeSession(user: SessionUser): string {
     const payload = JSON.stringify({
         ...user,
         exp: Date.now() + SESSION_MAX_AGE * 1000,
     });
-    return Buffer.from(payload).toString("base64url");
+    const base64Payload = Buffer.from(payload).toString("base64url");
+    const signature = getHmacSignature(base64Payload);
+    return `${base64Payload}.${signature}`;
 }
 
 /**
  * Decodes and validates session from payload.
+ * Verifies the HMAC-SHA256 signature before parsing.
  */
 export function decodeSession(token: string): SessionUser | null {
     try {
-        const json = Buffer.from(token, "base64url").toString("utf8");
+        if (!token || typeof token !== "string") {
+            return null;
+        }
+
+        const parts = token.split(".");
+        if (parts.length !== 2) {
+            return null;
+        }
+
+        const [base64Payload, signature] = parts;
+        if (!base64Payload || !signature) {
+            return null;
+        }
+
+        const expectedSignature = getHmacSignature(base64Payload);
+        const sigBuffer = Buffer.from(signature);
+        const expectedBuffer = Buffer.from(expectedSignature);
+
+        if (
+            sigBuffer.length !== expectedBuffer.length ||
+            !crypto.timingSafeEqual(sigBuffer, expectedBuffer)
+        ) {
+            return null;
+        }
+
+        const json = Buffer.from(base64Payload, "base64url").toString("utf8");
         const data = JSON.parse(json);
         if (!data || !data.exp || Date.now() > data.exp) {
             return null;

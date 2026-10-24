@@ -46,6 +46,28 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, message: "Missing required fields" }, { status: 400 });
         }
 
+        const duration = Number(hunt_duration_minutes);
+        if (isNaN(duration) || duration < 1 || duration > 1440) {
+            return NextResponse.json(
+                { success: false, message: "Hunt duration must be between 1 and 1440 minutes" },
+                { status: 400 }
+            );
+        }
+
+        const startTimeMs = new Date(start_time).getTime();
+        const endTimeMs = new Date(end_time).getTime();
+
+        if (isNaN(startTimeMs) || isNaN(endTimeMs)) {
+            return NextResponse.json({ success: false, message: "Invalid start or end time format" }, { status: 400 });
+        }
+
+        if (endTimeMs <= startTimeMs) {
+            return NextResponse.json(
+                { success: false, message: "End time must be after start time" },
+                { status: 400 }
+            );
+        }
+
         const supabase = createAdminClient();
 
         // Determine organization_id: session > body > fallback to primary org
@@ -92,7 +114,7 @@ export async function POST(request: NextRequest) {
                 start_time: new Date(start_time).toISOString(),
                 end_time: new Date(end_time).toISOString(),
                 is_active: false,
-                hunt_duration_minutes,
+                hunt_duration_minutes: duration,
                 hint_delay_minutes,
             })
             .select()
@@ -126,7 +148,7 @@ export async function PUT(request: NextRequest) {
         // Fetch current event to check ownership and org
         const { data: currentEvent, error: currentError } = await supabase
             .from("events")
-            .select("id, organization_id")
+            .select("id, organization_id, start_time, end_time")
             .eq("id", id)
             .maybeSingle();
 
@@ -137,6 +159,30 @@ export async function PUT(request: NextRequest) {
         // Check ownership if club_admin
         if (session?.role === "club_admin" && session.organization_id && currentEvent.organization_id !== session.organization_id) {
             return NextResponse.json({ success: false, message: "Unauthorized to edit this event" }, { status: 403 });
+        }
+
+        if (updates.hunt_duration_minutes !== undefined) {
+            const duration = Number(updates.hunt_duration_minutes);
+            if (isNaN(duration) || duration < 1 || duration > 1440) {
+                return NextResponse.json(
+                    { success: false, message: "Hunt duration must be between 1 and 1440 minutes" },
+                    { status: 400 }
+                );
+            }
+            updates.hunt_duration_minutes = duration;
+        }
+
+        if (updates.start_time !== undefined || updates.end_time !== undefined) {
+            const start = updates.start_time || currentEvent.start_time;
+            const end = updates.end_time || currentEvent.end_time;
+            const startTimeMs = new Date(start).getTime();
+            const endTimeMs = new Date(end).getTime();
+            if (isNaN(startTimeMs) || isNaN(endTimeMs) || endTimeMs <= startTimeMs) {
+                return NextResponse.json(
+                    { success: false, message: "End time must be after start time" },
+                    { status: 400 }
+                );
+            }
         }
 
         // Check if event name already exists within the same organization

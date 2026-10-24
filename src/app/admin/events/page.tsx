@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -338,6 +339,11 @@ export default function EventsPage() {
                             <DialogTitle className="text-white">
                                 {editingEvent ? "Edit Event" : "Create New Event"}
                             </DialogTitle>
+                            <DialogDescription className="text-gray-400 text-sm">
+                                {editingEvent
+                                    ? "Update the details and schedule for this treasure hunt event."
+                                    : "Fill in the details to schedule a new treasure hunt event."}
+                            </DialogDescription>
                         </DialogHeader>
                         <form onSubmit={handleSubmit} className="space-y-4">
                             {error && (

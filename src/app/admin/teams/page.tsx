@@ -17,6 +17,7 @@ import {
 import {
     Dialog,
     DialogContent,
+    DialogDescription,
     DialogHeader,
     DialogTitle,
     DialogTrigger,
@@ -349,6 +350,9 @@ export default function TeamsPage() {
                     <DialogContent className="bg-zinc-900 border-white/10">
                         <DialogHeader>
                             <DialogTitle className="text-white">Create New Team</DialogTitle>
+                            <DialogDescription className="text-gray-400 text-sm">
+                                Enter team details and maximum player slots for this team.
+                            </DialogDescription>
                         </DialogHeader>
                         <div className="space-y-4 pt-4">
                             <div className="space-y-2">
@@ -513,6 +517,9 @@ export default function TeamsPage() {
                 <DialogContent className="bg-zinc-900 border-white/10">
                     <DialogHeader>
                         <DialogTitle className="text-white">Move Player</DialogTitle>
+                        <DialogDescription className="text-gray-400 text-sm">
+                            Assign this participant to a different active team.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                         <p className="text-gray-400">
@@ -559,6 +566,9 @@ export default function TeamsPage() {
                 <DialogContent className="bg-zinc-900 border-white/10">
                     <DialogHeader>
                         <DialogTitle className="text-white">🔑 Reset Password</DialogTitle>
+                        <DialogDescription className="text-gray-400 text-sm">
+                            Set a new temporary password for this team member.
+                        </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 pt-4">
                         <p className="text-gray-400">
