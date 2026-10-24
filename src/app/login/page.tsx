@@ -23,9 +23,10 @@ function LoginForm() {
     // Redirect if already authenticated
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            router.push("/hunt");
+            const redirectUrl = searchParams.get("redirect") || "/hunt";
+            router.push(redirectUrl);
         }
-    }, [authLoading, isAuthenticated, router]);
+    }, [authLoading, isAuthenticated, router, searchParams]);
 
     // Check for registration success message
     useEffect(() => {
@@ -52,7 +53,8 @@ function LoginForm() {
             if (data.success) {
                 // Use auth context to login
                 login(data.player, data.team);
-                router.push("/hunt");
+                const redirectUrl = searchParams.get("redirect") || "/hunt";
+                router.push(redirectUrl);
             } else {
                 setError(data.message || "Invalid credentials");
             }

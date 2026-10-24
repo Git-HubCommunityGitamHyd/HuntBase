@@ -1,14 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
     try {
-        const { token, team_id, player_id } = await request.json();
+        const session = getSession(request);
+        const body = await request.json().catch(() => ({}));
+        const token = body.token;
+        const team_id = body.team_id || (session?.role === "player" ? session.team_id : null);
+        const player_id = (session?.role === "player" ? session.id : null) || body.player_id;
 
         if (!token || !team_id) {
             return NextResponse.json(
                 { success: false, message: "Missing token or team_id" },
                 { status: 400 }
+            );
+        }
+
+        // Session validation: If caller is a player, ensure they can only scan for their own team
+        if (session && session.role === "player" && session.team_id && session.team_id !== team_id) {
+            return NextResponse.json(
+                { success: false, message: "Unauthorized: You can only scan checkpoints for your own team" },
+                { status: 403 }
             );
         }
 

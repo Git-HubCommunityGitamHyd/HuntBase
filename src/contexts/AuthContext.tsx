@@ -77,6 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setTeam(null);
         localStorage.removeItem("player");
         localStorage.removeItem("team");
+        fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
         router.push("/login");
     };
 

@@ -12,7 +12,7 @@ import { useAuth } from "@/contexts/AuthContext";
 function ScanContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
-    const { team, isLoading: authLoading } = useAuth();
+    const { team, player, isLoading: authLoading } = useAuth();
     const [localTeam, setLocalTeam] = useState<Team | null>(null);
     const [isScanning, setIsScanning] = useState(false);
     const [result, setResult] = useState<{ success: boolean; message: string; pointsEarned?: number } | null>(null);
@@ -89,7 +89,7 @@ function ScanContent() {
             const response = await fetch("/api/scan", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ token, team_id: activeTeam.id }),
+                body: JSON.stringify({ token, team_id: activeTeam.id, player_id: player?.id }),
             });
 
             const data = await response.json();
@@ -134,7 +134,7 @@ function ScanContent() {
         } finally {
             setIsProcessing(false);
         }
-    }, [isProcessing, scanLocked, stopScanner, localTeam, team, router]);
+    }, [isProcessing, scanLocked, stopScanner, localTeam, team, player, router]);
 
     // Handle authentication & URL token auto-scan
     useEffect(() => {
