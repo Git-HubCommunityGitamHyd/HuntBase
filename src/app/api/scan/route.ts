@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
             await supabase
                 .from("fake_qr_scans")
                 .insert({
-                    organization_id: team.organization_id || null,
+                    organization_id: team.organization_id || event.organization_id || null,
                     event_id: team.event_id,
                     qr_code_id: qrCode.id,
                     team_id: team_id,
@@ -193,7 +193,7 @@ export async function POST(request: NextRequest) {
         const { error: scanError } = await supabase
             .from("scans")
             .insert({
-                organization_id: team.organization_id || null,
+                organization_id: team.organization_id || event.organization_id || null,
                 event_id: team.event_id,
                 team_id,
                 clue_id: qrCode.clue_id,

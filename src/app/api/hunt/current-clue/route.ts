@@ -60,13 +60,20 @@ export async function POST(request: NextRequest) {
             .select("id", { count: "exact" })
             .eq("event_id", team.event_id);
 
-        const isComplete = team.current_step >= (totalClues || 0);
+        if (!totalClues || totalClues === 0) {
+            return NextResponse.json(
+                { success: false, message: "No clues configured for this event yet" },
+                { status: 404 }
+            );
+        }
+
+        const isComplete = team.current_step >= totalClues;
 
         if (isComplete) {
             return NextResponse.json({
                 success: true,
                 isComplete: true,
-                totalClues: totalClues || 0,
+                totalClues: totalClues,
                 currentStep: team.current_step,
                 score: team.score,
                 event,
@@ -108,16 +115,19 @@ export async function POST(request: NextRequest) {
                         .from("team_clue_order")
                         .insert(clueOrders);
 
-                    if (!insertError) {
-                        const { data: retryClueOrder } = await supabase
-                            .from("team_clue_order")
-                            .select("*")
-                            .eq("team_id", team.id)
-                            .eq("step_index", team.current_step)
-                            .single();
-
-                        clueOrder = retryClueOrder;
+                    if (insertError) {
+                        console.warn("Clue order insert conflict (concurrent initialization):", insertError.message);
                     }
+
+                    // Query assigned clue order (works whether this request inserted it or a concurrent one did)
+                    const { data: retryClueOrder } = await supabase
+                        .from("team_clue_order")
+                        .select("*")
+                        .eq("team_id", team.id)
+                        .eq("step_index", team.current_step)
+                        .single();
+
+                    clueOrder = retryClueOrder;
                 }
             }
         }

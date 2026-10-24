@@ -63,11 +63,19 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Fetch event to get organization_id
+        const { data: eventData } = await supabase
+            .from("events")
+            .select("organization_id")
+            .eq("id", event_id)
+            .single();
+
         // Create team (no username/password - players will register themselves)
         const { data, error } = await supabase
             .from("teams")
             .insert({
                 event_id,
+                organization_id: eventData?.organization_id || null,
                 team_name,
                 min_players,
                 max_players,

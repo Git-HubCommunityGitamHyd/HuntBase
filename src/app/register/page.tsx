@@ -36,6 +36,7 @@ function RegisterForm() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const eventIdFromUrl = searchParams.get("event_id") || "";
+    const redirectFromUrl = searchParams.get("redirect") || "";
 
     const [teams, setTeams] = useState<AvailableTeam[]>([]);
     const [selectedEventId, setSelectedEventId] = useState<string>(eventIdFromUrl || "all");
@@ -154,8 +155,11 @@ function RegisterForm() {
             const data = await response.json();
 
             if (data.success) {
-                // Redirect to login with success message
-                router.push("/login?registered=true");
+                // Redirect to login with success message and preserve redirect
+                const loginUrl = redirectFromUrl
+                    ? `/login?registered=true&redirect=${encodeURIComponent(redirectFromUrl)}`
+                    : "/login?registered=true";
+                router.push(loginUrl);
             } else {
                 setError(data.message || "Registration failed");
             }
@@ -211,6 +215,17 @@ function RegisterForm() {
                             <Alert variant="destructive" className="bg-red-500/10 border-red-500/50 text-red-400">
                                 <AlertDescription>{error}</AlertDescription>
                             </Alert>
+                        )}
+
+                        {/* Event indicator when single event is available/selected */}
+                        {availableEvents.length === 1 && (
+                            <div className="p-3 bg-white/5 border border-white/10 rounded-lg text-sm">
+                                <span className="text-gray-400 text-xs uppercase tracking-wider font-semibold block">Event</span>
+                                <span className="text-white font-medium text-base mt-0.5 block">{availableEvents[0].name}</span>
+                                {availableEvents[0].orgName && (
+                                    <span className="text-gray-400 text-xs mt-0.5 block">Organized by {availableEvents[0].orgName}</span>
+                                )}
+                            </div>
                         )}
 
                         {/* Optional Event Filter when multiple events exist */}
@@ -365,7 +380,7 @@ function RegisterForm() {
 
                 <div className="mt-6 flex flex-col items-center gap-2">
                     <Link
-                        href="/login"
+                        href={redirectFromUrl ? `/login?redirect=${encodeURIComponent(redirectFromUrl)}` : "/login"}
                         className="text-sm text-gray-500 hover:text-white"
                     >
                         Already registered? Login →

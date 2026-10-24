@@ -1,16 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/auth/session";
 
 // POST - Mark a hint as viewed for a team's current clue
 export async function POST(request: NextRequest) {
     try {
-        const body = await request.json();
-        const { team_id, clue_id, player_id } = body;
+        const session = getSession(request);
+        const body = await request.json().catch(() => ({}));
+        const team_id = body.team_id || (session?.role === "player" ? session.team_id : null);
+        const clue_id = body.clue_id;
+        const player_id = (session?.role === "player" ? session.id : null) || body.player_id;
 
         if (!team_id || !clue_id) {
             return NextResponse.json(
                 { success: false, message: "Team ID and Clue ID are required" },
                 { status: 400 }
+            );
+        }
+
+        // Session validation: If caller is a player, ensure they cannot penalize another team
+        if (session && session.role === "player" && session.team_id && session.team_id !== team_id) {
+            return NextResponse.json(
+                { success: false, message: "Unauthorized: You can only view hints for your own team" },
+                { status: 403 }
             );
         }
 

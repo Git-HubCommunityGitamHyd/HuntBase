@@ -17,9 +17,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Routes that don't require authentication
-const publicRoutes = ["/", "/login", "/register", "/admin-login"];
+const publicRoutes = ["/", "/login", "/register", "/register-club", "/admin-login"];
 // Routes that require admin authentication
-const adminRoutes = ["/admin"];
+const adminRoutes = ["/admin", "/super-admin"];
 
 export function AuthProvider({ children }: { children: ReactNode }) {
     const [player, setPlayer] = useState<TeamMember | null>(null);
@@ -61,7 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (!isPublicRoute && !isAdminRoute && !player) {
             // Not authenticated and trying to access protected route
-            router.push("/login");
+            const search = typeof window !== "undefined" ? window.location.search : "";
+            const currentUrl = `${pathname}${search}`;
+            router.push(`/login?redirect=${encodeURIComponent(currentUrl)}`);
         }
     }, [isLoading, player, pathname, router]);
 

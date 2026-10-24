@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
             .select("id, name, organization_id, is_active");
 
         if (eventIdParam) {
-            eventQuery = eventQuery.eq("id", eventIdParam);
+            eventQuery = eventQuery.eq("id", eventIdParam).eq("is_active", true);
         } else {
             eventQuery = eventQuery.eq("is_active", true);
         }
@@ -69,27 +69,32 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ success: true, data: [] });
         }
 
-        // Get member counts for each team
-        const teamsWithCounts = await Promise.all(
-            teams.map(async (team) => {
-                const { count } = await supabase
-                    .from("team_members")
-                    .select("*", { count: "exact", head: true })
-                    .eq("team_id", team.id);
+        // Batch fetch all team members for these teams in ONE query instead of N separate queries
+        const teamIds = teams.map(t => t.id);
+        const { data: members } = await supabase
+            .from("team_members")
+            .select("team_id")
+            .in("team_id", teamIds);
 
-                const ev = eventsMap[team.event_id];
+        const memberCounts: Record<string, number> = {};
+        (members || []).forEach(m => {
+            memberCounts[m.team_id] = (memberCounts[m.team_id] || 0) + 1;
+        });
 
-                return {
-                    id: team.id,
-                    team_name: team.team_name,
-                    event_id: team.event_id,
-                    event_name: ev?.name || "Unknown Event",
-                    organization: ev?.organization || null,
-                    current_members: count || 0,
-                    max_players: team.max_players || 2,
-                };
-            })
-        );
+        const teamsWithCounts = teams.map((team) => {
+            const count = memberCounts[team.id] || 0;
+            const ev = eventsMap[team.event_id];
+
+            return {
+                id: team.id,
+                team_name: team.team_name,
+                event_id: team.event_id,
+                event_name: ev?.name || "Unknown Event",
+                organization: ev?.organization || null,
+                current_members: count,
+                max_players: team.max_players || 2,
+            };
+        });
 
         // Filter to only teams with available slots
         const availableTeams = teamsWithCounts.filter(

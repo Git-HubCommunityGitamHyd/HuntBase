@@ -20,13 +20,16 @@ function LoginForm() {
     const [success, setSuccess] = useState("");
     const [isLoading, setIsLoading] = useState(false);
 
+    const rawRedirect = searchParams.get("redirect");
+    const isValidRedirect = rawRedirect && rawRedirect.startsWith("/") && !rawRedirect.startsWith("//");
+    const redirectUrl = isValidRedirect ? rawRedirect : "/hunt";
+
     // Redirect if already authenticated
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
-            const redirectUrl = searchParams.get("redirect") || "/hunt";
             router.push(redirectUrl);
         }
-    }, [authLoading, isAuthenticated, router, searchParams]);
+    }, [authLoading, isAuthenticated, redirectUrl, router]);
 
     // Check for registration success message
     useEffect(() => {
@@ -53,7 +56,6 @@ function LoginForm() {
             if (data.success) {
                 // Use auth context to login
                 login(data.player, data.team);
-                const redirectUrl = searchParams.get("redirect") || "/hunt";
                 router.push(redirectUrl);
             } else {
                 setError(data.message || "Invalid credentials");
@@ -152,7 +154,7 @@ function LoginForm() {
 
                 <div className="mt-6 flex flex-col items-center gap-2">
                     <Link
-                        href="/register"
+                        href={isValidRedirect ? `/register?redirect=${encodeURIComponent(rawRedirect)}` : "/register"}
                         className="text-sm text-white hover:underline font-medium"
                     >
                         New player? Register here →

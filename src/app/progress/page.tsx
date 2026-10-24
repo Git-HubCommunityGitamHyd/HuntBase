@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +13,7 @@ import { formatDateTime, getTimeRemaining } from "@/lib/utils/helpers";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function ProgressPage() {
+    const router = useRouter();
     const { team, player, isLoading: authLoading } = useAuth();
     const [localTeam, setLocalTeam] = useState<Team | null>(null);
     const [scans, setScans] = useState<(Scan & { clue?: Clue })[]>([]);
@@ -53,6 +55,7 @@ export default function ProgressPage() {
         if (authLoading) return;
 
         if (!team) {
+            router.push("/login?redirect=/progress");
             setIsLoading(false);
             return;
         }
@@ -65,16 +68,17 @@ export default function ProgressPage() {
         
         loadData();
 
+        // Subscribe to teams table for score/step updates (scans table has RLS false, so teams update carries live telemetry)
         const supabase = createClient();
-        const channel = supabase
-            .channel("progress-updates")
+        const teamChannel = supabase
+            .channel(`progress-team-${team.id}`)
             .on(
                 "postgres_changes",
                 {
-                    event: "*",
+                    event: "UPDATE",
                     schema: "public",
-                    table: "scans",
-                    filter: `team_id=eq.${team.id}`,
+                    table: "teams",
+                    filter: `id=eq.${team.id}`,
                 },
                 () => {
                     fetchData(team);
@@ -83,9 +87,9 @@ export default function ProgressPage() {
             .subscribe();
 
         return () => {
-            supabase.removeChannel(channel);
+            supabase.removeChannel(teamChannel);
         };
-    }, [authLoading, team, fetchData]);
+    }, [authLoading, team, fetchData, router]);
 
     useEffect(() => {
         if (!event) return;
@@ -110,9 +114,11 @@ export default function ProgressPage() {
     // Check if hunt is complete or timed out
     const isHuntComplete = localTeam.current_step >= totalClues && totalClues > 0;
     const isHuntTimedOut = Boolean(
-        event?.hunt_started_at &&
-        currentTime > 0 &&
-        currentTime >= (new Date(event.hunt_started_at).getTime() + (event.hunt_duration_minutes || 60) * 60 * 1000)
+        (event?.hunt_started_at &&
+            currentTime > 0 &&
+            currentTime >= (new Date(event.hunt_started_at).getTime() + (event.hunt_duration_minutes || 60) * 60 * 1000)) ||
+        (event?.end_time && currentTime > 0 && currentTime >= new Date(event.end_time).getTime()) ||
+        (event && !event.is_active)
     );
 
     // Block access during active hunt to prevent collusion
@@ -137,7 +143,7 @@ export default function ProgressPage() {
         );
     }
 
-    const progressPercent = totalClues > 0 ? (localTeam.current_step / totalClues) * 100 : 0;
+    const progressPercent = totalClues > 0 ? Math.min(100, Math.round((localTeam.current_step / totalClues) * 100)) : 0;
 
     return (
         <div className="min-h-screen bg-black p-4">
