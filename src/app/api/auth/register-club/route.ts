@@ -58,10 +58,27 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Password length check
-        if (typeof password !== "string" || password.length < 6) {
+        // Full name length check (max 100 chars)
+        if (cleanFullName.length > 100) {
             return NextResponse.json(
-                { success: false, message: "Password must be at least 6 characters long" },
+                { success: false, message: "Full name must not exceed 100 characters" },
+                { status: 400 }
+            );
+        }
+
+        // Email validation & length limit (prevents PostgREST .or() injection)
+        const emailRegex = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
+        if (!emailRegex.test(cleanEmail) || cleanEmail.length > 255) {
+            return NextResponse.json(
+                { success: false, message: "Invalid contact email address" },
+                { status: 400 }
+            );
+        }
+
+        // Password length check
+        if (typeof password !== "string" || password.length < 6 || password.length > 128) {
+            return NextResponse.json(
+                { success: false, message: "Password must be between 6 and 128 characters long" },
                 { status: 400 }
             );
         }

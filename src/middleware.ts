@@ -64,6 +64,7 @@ export function middleware(request: NextRequest) {
         const requestHeaders = new Headers(request.headers);
         requestHeaders.set("x-user-id", session.id);
         requestHeaders.set("x-user-role", session.role);
+        requestHeaders.delete("x-organization-id");
         if (session.organization_id) {
             requestHeaders.set("x-organization-id", session.organization_id);
         }
@@ -79,6 +80,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
+    runtime: "nodejs",
     matcher: [
         /*
          * Match all request paths except for the ones starting with:

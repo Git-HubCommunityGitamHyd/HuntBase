@@ -13,13 +13,16 @@ export interface SessionUser {
 const SESSION_COOKIE_NAME = "huntbase_session";
 const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
 
-const SESSION_SECRET =
-    process.env.SESSION_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    "huntbase-secure-default-secret-salt";
+function getSessionSecret(): string {
+    return (
+        process.env.SESSION_SECRET ||
+        process.env.SUPABASE_SERVICE_ROLE_KEY ||
+        "huntbase-secure-default-secret-salt"
+    );
+}
 
 function getHmacSignature(payload: string): string {
-    return crypto.createHmac("sha256", SESSION_SECRET).update(payload).digest("base64url");
+    return crypto.createHmac("sha256", getSessionSecret()).update(payload).digest("base64url");
 }
 
 /**
@@ -69,9 +72,26 @@ export function decodeSession(token: string): SessionUser | null {
 
         const json = Buffer.from(base64Payload, "base64url").toString("utf8");
         const data = JSON.parse(json);
-        if (!data || !data.exp || Date.now() > data.exp) {
+        if (
+            !data ||
+            typeof data !== "object" ||
+            !data.exp ||
+            typeof data.exp !== "number" ||
+            Date.now() > data.exp
+        ) {
             return null;
         }
+
+        if (
+            !data.id ||
+            typeof data.id !== "string" ||
+            !data.username ||
+            typeof data.username !== "string" ||
+            !["super_admin", "club_admin", "player"].includes(data.role)
+        ) {
+            return null;
+        }
+
         return data as SessionUser;
     } catch {
         return null;

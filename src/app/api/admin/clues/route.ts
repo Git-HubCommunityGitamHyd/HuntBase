@@ -127,13 +127,21 @@ export async function POST(request: NextRequest) {
         const supabase = createAdminClient();
 
         if (session.role === "club_admin") {
+            if (!session.organization_id) {
+                return NextResponse.json({ success: false, message: "Forbidden: No organization assigned" }, { status: 403 });
+            }
+
             const { data: event } = await supabase
                 .from("events")
                 .select("organization_id")
                 .eq("id", event_id)
                 .maybeSingle();
 
-            if (!event || event.organization_id !== session.organization_id) {
+            if (!event) {
+                return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 });
+            }
+
+            if (event.organization_id !== session.organization_id) {
                 return NextResponse.json({ success: false, message: "Forbidden: Event belongs to another club" }, { status: 403 });
             }
         }
@@ -185,6 +193,10 @@ export async function PUT(request: NextRequest) {
         const supabase = createAdminClient();
 
         if (session.role === "club_admin") {
+            if (!session.organization_id) {
+                return NextResponse.json({ success: false, message: "Forbidden: No organization assigned" }, { status: 403 });
+            }
+
             const { data: clue } = await supabase
                 .from("clues")
                 .select("event_id")
@@ -203,6 +215,19 @@ export async function PUT(request: NextRequest) {
 
             if (!event || event.organization_id !== session.organization_id) {
                 return NextResponse.json({ success: false, message: "Forbidden: Clue belongs to another club" }, { status: 403 });
+            }
+
+            // Prevent reassigning clue to another club's event
+            if (updates.event_id && updates.event_id !== clue.event_id) {
+                const { data: targetEvent } = await supabase
+                    .from("events")
+                    .select("organization_id")
+                    .eq("id", updates.event_id)
+                    .maybeSingle();
+
+                if (!targetEvent || targetEvent.organization_id !== session.organization_id) {
+                    return NextResponse.json({ success: false, message: "Forbidden: Target event belongs to another club" }, { status: 403 });
+                }
             }
         }
 
@@ -243,6 +268,10 @@ export async function DELETE(request: NextRequest) {
         const supabase = createAdminClient();
 
         if (session.role === "club_admin") {
+            if (!session.organization_id) {
+                return NextResponse.json({ success: false, message: "Forbidden: No organization assigned" }, { status: 403 });
+            }
+
             const { data: clue } = await supabase
                 .from("clues")
                 .select("event_id")

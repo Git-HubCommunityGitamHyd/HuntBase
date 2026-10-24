@@ -39,6 +39,13 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
     try {
         const session = getSession(request);
+        if (!session) {
+            return NextResponse.json({ success: false, message: "Unauthorized: Session required" }, { status: 401 });
+        }
+        if (session.role === "player" || (session.role !== "super_admin" && session.role !== "club_admin")) {
+            return NextResponse.json({ success: false, message: "Forbidden: Admin access required" }, { status: 403 });
+        }
+
         const body = await request.json();
         const { name, start_time, end_time, hunt_duration_minutes = 60, hint_delay_minutes = 5 } = body;
 
@@ -70,21 +77,32 @@ export async function POST(request: NextRequest) {
 
         const supabase = createAdminClient();
 
-        // Determine organization_id: session > body > fallback to primary org
-        let targetOrgId = session?.organization_id || body.organization_id;
-        if (!targetOrgId) {
-            const { data: defaultOrg } = await supabase
-                .from("organizations")
-                .select("id")
-                .eq("slug", "github-community")
-                .maybeSingle();
+        // Determine organization_id: strictly enforce session organization for club_admin
+        let targetOrgId: string | undefined;
+        if (session.role === "club_admin") {
+            if (!session.organization_id) {
+                return NextResponse.json(
+                    { success: false, message: "Forbidden: No organization assigned to club admin" },
+                    { status: 403 }
+                );
+            }
+            targetOrgId = session.organization_id;
+        } else {
+            targetOrgId = body.organization_id || session.organization_id;
+            if (!targetOrgId) {
+                const { data: defaultOrg } = await supabase
+                    .from("organizations")
+                    .select("id")
+                    .eq("slug", "github-community")
+                    .maybeSingle();
 
-            targetOrgId = defaultOrg?.id;
-        }
+                targetOrgId = defaultOrg?.id;
+            }
 
-        if (!targetOrgId) {
-            const { data: firstOrg } = await supabase.from("organizations").select("id").limit(1).single();
-            targetOrgId = firstOrg?.id;
+            if (!targetOrgId) {
+                const { data: firstOrg } = await supabase.from("organizations").select("id").limit(1).single();
+                targetOrgId = firstOrg?.id;
+            }
         }
 
         // Check if event name already exists for this organization
@@ -136,6 +154,13 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const session = getSession(request);
+        if (!session) {
+            return NextResponse.json({ success: false, message: "Unauthorized: Session required" }, { status: 401 });
+        }
+        if (session.role === "player" || (session.role !== "super_admin" && session.role !== "club_admin")) {
+            return NextResponse.json({ success: false, message: "Forbidden: Admin access required" }, { status: 403 });
+        }
+
         const body = await request.json();
         const { id, ...updates } = body;
 
@@ -157,8 +182,12 @@ export async function PUT(request: NextRequest) {
         }
 
         // Check ownership if club_admin
-        if (session?.role === "club_admin" && session.organization_id && currentEvent.organization_id !== session.organization_id) {
-            return NextResponse.json({ success: false, message: "Unauthorized to edit this event" }, { status: 403 });
+        if (session.role === "club_admin") {
+            if (!session.organization_id || currentEvent.organization_id !== session.organization_id) {
+                return NextResponse.json({ success: false, message: "Unauthorized to edit this event" }, { status: 403 });
+            }
+            // Prevent club_admin from reassigning organization_id
+            delete updates.organization_id;
         }
 
         if (updates.hunt_duration_minutes !== undefined) {
@@ -232,6 +261,13 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
     try {
         const session = getSession(request);
+        if (!session) {
+            return NextResponse.json({ success: false, message: "Unauthorized: Session required" }, { status: 401 });
+        }
+        if (session.role === "player" || (session.role !== "super_admin" && session.role !== "club_admin")) {
+            return NextResponse.json({ success: false, message: "Forbidden: Admin access required" }, { status: 403 });
+        }
+
         const { searchParams } = new URL(request.url);
         const id = searchParams.get("id");
 
@@ -242,14 +278,22 @@ export async function DELETE(request: NextRequest) {
         const supabase = createAdminClient();
 
         // Check ownership if club_admin
-        if (session?.role === "club_admin" && session.organization_id) {
+        if (session.role === "club_admin") {
+            if (!session.organization_id) {
+                return NextResponse.json({ success: false, message: "Forbidden: No organization assigned" }, { status: 403 });
+            }
+
             const { data: currentEvent } = await supabase
                 .from("events")
                 .select("organization_id")
                 .eq("id", id)
                 .maybeSingle();
 
-            if (currentEvent && currentEvent.organization_id !== session.organization_id) {
+            if (!currentEvent) {
+                return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 });
+            }
+
+            if (currentEvent.organization_id !== session.organization_id) {
                 return NextResponse.json({ success: false, message: "Unauthorized to delete this event" }, { status: 403 });
             }
         }
