@@ -188,7 +188,7 @@ function ScanContent() {
             };
 
             await html5QrCode.start(
-                { facingMode: "environment" },
+                { facingMode: { ideal: "environment" } },
                 config,
                 (decodedText: string) => {
                     processQRCode(decodedText);

@@ -422,7 +422,7 @@ export default function HuntPage() {
                                         <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center">
                                             <span className="text-white font-bold">{localTeam.current_step + 1}</span>
                                         </div>
-                                        <CardTitle className="text-lg text-white">Current Clue</CardTitle>
+                                        <CardTitle className="text-lg text-white">Clue {localTeam.current_step + 1} of {totalClues}</CardTitle>
                                     </div>
                                     {showHint && (
                                         <Badge className="bg-blue-500/20 text-blue-300 border-blue-500/50">
