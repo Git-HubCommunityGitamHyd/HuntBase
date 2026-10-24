@@ -1,14 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getSession } from "@/lib/auth/session";
+import { shuffleArray } from "@/lib/utils/helpers";
 
 export async function POST(request: NextRequest) {
     try {
-        const { team_id } = await request.json();
+        const session = getSession(request);
+        const body = await request.json().catch(() => ({}));
+        const team_id = body.team_id || (session?.role === "player" ? session.team_id : null);
 
         if (!team_id) {
             return NextResponse.json(
                 { success: false, message: "team_id is required" },
                 { status: 400 }
+            );
+        }
+
+        // Session validation: If caller is a player, ensure they cannot query another team's clue
+        if (session && session.role === "player" && session.team_id && session.team_id !== team_id) {
+            return NextResponse.json(
+                { success: false, message: "Unauthorized access to team clue" },
+                { status: 403 }
             );
         }
 
@@ -68,6 +80,47 @@ export async function POST(request: NextRequest) {
             .eq("team_id", team.id)
             .eq("step_index", team.current_step)
             .single();
+
+        // Fallback safeguard: If team has no clue assignments, dynamically generate clue order
+        if (!clueOrder) {
+            const { count: orderCount } = await supabase
+                .from("team_clue_order")
+                .select("id", { count: "exact", head: true })
+                .eq("team_id", team.id);
+
+            if (!orderCount || orderCount === 0) {
+                const { data: clues } = await supabase
+                    .from("clues")
+                    .select("id")
+                    .eq("event_id", team.event_id)
+                    .order("step_number", { ascending: true });
+
+                if (clues && clues.length > 0) {
+                    const clueIds = clues.map((c) => c.id);
+                    const shuffledClues = shuffleArray(clueIds);
+                    const clueOrders = shuffledClues.map((clueId, index) => ({
+                        team_id: team.id,
+                        clue_id: clueId,
+                        step_index: index,
+                    }));
+
+                    const { error: insertError } = await supabase
+                        .from("team_clue_order")
+                        .insert(clueOrders);
+
+                    if (!insertError) {
+                        const { data: retryClueOrder } = await supabase
+                            .from("team_clue_order")
+                            .select("*")
+                            .eq("team_id", team.id)
+                            .eq("step_index", team.current_step)
+                            .single();
+
+                        clueOrder = retryClueOrder;
+                    }
+                }
+            }
+        }
 
         if (!clueOrder) {
             return NextResponse.json(

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { shuffleArray } from "@/lib/utils/helpers";
 
 // GET - Fetch all teams for an event
 export async function GET(request: NextRequest) {
@@ -81,6 +82,31 @@ export async function POST(request: NextRequest) {
 
         if (error) {
             return NextResponse.json({ success: false, message: error.message }, { status: 500 });
+        }
+
+        // Generate clue order for the team if clues exist for this event
+        const { data: clues } = await supabase
+            .from("clues")
+            .select("id")
+            .eq("event_id", event_id)
+            .order("step_number", { ascending: true });
+
+        if (clues && clues.length > 0) {
+            const clueIds = clues.map((c) => c.id);
+            const shuffledClues = shuffleArray(clueIds);
+            const clueOrders = shuffledClues.map((clueId, index) => ({
+                team_id: data.id,
+                clue_id: clueId,
+                step_index: index,
+            }));
+
+            const { error: clueOrderError } = await supabase
+                .from("team_clue_order")
+                .insert(clueOrders);
+
+            if (clueOrderError) {
+                console.error("Clue order assignment error for manual team:", clueOrderError);
+            }
         }
 
         return NextResponse.json({ success: true, data });
