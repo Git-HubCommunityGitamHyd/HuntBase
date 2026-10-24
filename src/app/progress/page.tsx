@@ -28,49 +28,23 @@ export default function ProgressPage() {
     }, []);
 
     const fetchData = useCallback(async (teamData: Team) => {
-        const supabase = createClient();
+        try {
+            const res = await fetch(`/api/hunt/progress?team_id=${teamData.id}`);
+            const data = await res.json();
 
-        // Fetch fresh team data from database
-        const { data: freshTeam } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("id", teamData.id)
-            .single();
-
-        if (freshTeam) {
-            setLocalTeam(freshTeam);
-            localStorage.setItem("team", JSON.stringify(freshTeam));
-        }
-
-        const { data: eventData } = await supabase
-            .from("events")
-            .select("*")
-            .eq("id", teamData.event_id)
-            .single();
-
-        if (eventData) {
-            setEvent(eventData);
-        }
-
-        const { data: clues } = await supabase
-            .from("clues")
-            .select("*")
-            .eq("event_id", teamData.event_id);
-
-        setTotalClues(clues?.length || 0);
-
-        const { data: scanData } = await supabase
-            .from("scans")
-            .select("*")
-            .eq("team_id", teamData.id)
-            .order("scanned_at", { ascending: true });
-
-        if (scanData && clues) {
-            const scansWithClues = scanData.map((scan: Scan) => ({
-                ...scan,
-                clue: clues.find((c: Clue) => c.id === scan.clue_id),
-            }));
-            setScans(scansWithClues);
+            if (data.success) {
+                if (data.team) {
+                    setLocalTeam(data.team);
+                    localStorage.setItem("team", JSON.stringify(data.team));
+                }
+                if (data.event) {
+                    setEvent(data.event);
+                }
+                setTotalClues(data.totalClues || 0);
+                setScans(data.scans || []);
+            }
+        } catch (error) {
+            console.error("Progress fetch error:", error);
         }
     }, []);
 
