@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getCurrentPlayerSession } from "@/lib/auth/server-session";
 
 // POST - Mark a clue as started (set clue_started_at timestamp) or get existing
 export async function POST(request: NextRequest) {
@@ -15,6 +16,13 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const playerSession = await getCurrentPlayerSession(request, supabase);
+        if (!playerSession) {
+            return NextResponse.json({ success: false, message: "A current player session is required" }, { status: 401 });
+        }
+        if (team_id !== playerSession.team_id) {
+            return NextResponse.json({ success: false, message: "This player is not a member of that team" }, { status: 403 });
+        }
 
         // Fetch the full clue order record
         const { data: existingClueOrder, error: fetchError } = await supabase

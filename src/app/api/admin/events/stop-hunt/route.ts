@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getActiveAdminSession, getAdminOwnedEvent } from "@/lib/auth/server-session";
 
 // POST - Stop the hunt for an event
 export async function POST(request: NextRequest) {
@@ -7,7 +8,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { event_id } = body;
 
-        if (!event_id) {
+        if (typeof event_id !== "string" || !event_id) {
             return NextResponse.json(
                 { success: false, message: "Event ID is required" },
                 { status: 400 }
@@ -15,12 +16,20 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const admin = await getActiveAdminSession(request, supabase);
+        if (!admin) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        const event = await getAdminOwnedEvent(admin, event_id, supabase);
+        if (!event) return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 });
 
         // Clear hunt_started_at to stop the hunt
-        const { error: updateError } = await supabase
+        let eventUpdate = supabase
             .from("events")
             .update({ hunt_started_at: null })
             .eq("id", event_id);
+        eventUpdate = event.organization_id
+            ? eventUpdate.eq("organization_id", event.organization_id)
+            : eventUpdate.is("organization_id", null);
+        const { error: updateError } = await eventUpdate;
 
         if (updateError) {
             return NextResponse.json(

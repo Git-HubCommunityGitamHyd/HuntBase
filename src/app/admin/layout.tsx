@@ -21,27 +21,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const [isLoading, setIsLoading] = useState(true);
     const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-    // Hydrate admin from localStorage or server session on mount
+    // The server session is authoritative; localStorage is only a display cache.
     useEffect(() => {
         let isMounted = true;
 
         async function verifyAdminAuth() {
-            // 1. Try local storage cache first
-            const storedAdmin = localStorage.getItem("admin");
-            if (storedAdmin) {
-                try {
-                    const parsed = JSON.parse(storedAdmin);
-                    if (isMounted) {
-                        setAdmin(parsed);
-                        setIsLoading(false);
-                        return;
-                    }
-                } catch {
-                    localStorage.removeItem("admin");
-                }
-            }
-
-            // 2. If not in localStorage, verify against server session
+            // Always check the current signed session and account status.
             try {
                 const res = await fetch("/api/auth/me");
                 if (res.ok) {
@@ -58,6 +43,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             } catch (err) {
                 console.error("Failed to verify server session:", err);
             }
+
+            localStorage.removeItem("admin");
 
             // 3. If neither worked, redirect to login
             if (isMounted) {

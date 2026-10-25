@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getCurrentPlayerSession } from "@/lib/auth/server-session";
 
 // POST - Mark a hint as viewed for a team's current clue
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { team_id, clue_id, player_id } = body;
+        const { team_id, clue_id } = body;
 
         if (!team_id || !clue_id) {
             return NextResponse.json(
@@ -15,6 +16,13 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const playerSession = await getCurrentPlayerSession(request, supabase);
+        if (!playerSession) {
+            return NextResponse.json({ success: false, message: "A current player session is required" }, { status: 401 });
+        }
+        if (team_id !== playerSession.team_id) {
+            return NextResponse.json({ success: false, message: "This player is not a member of that team" }, { status: 403 });
+        }
 
         // Verify team exists and is not disqualified
         const { data: team, error: teamError } = await supabase
@@ -89,7 +97,7 @@ export async function POST(request: NextRequest) {
             .update({
                 hint_viewed: true,
                 hint_viewed_at: new Date().toISOString(),
-                hint_viewed_by: player_id || null,
+                hint_viewed_by: playerSession.id,
             })
             .eq("id", clueOrder.id);
 

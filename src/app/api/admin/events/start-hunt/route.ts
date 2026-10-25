@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getActiveAdminSession, getAdminOwnedEvent } from "@/lib/auth/server-session";
 
 // Fisher-Yates shuffle algorithm
 function shuffleArray<T>(array: T[]): T[] {
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { event_id } = body;
 
-        if (!event_id) {
+        if (typeof event_id !== "string" || !event_id) {
             return NextResponse.json(
                 { success: false, message: "Event ID is required" },
                 { status: 400 }
@@ -25,13 +26,20 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const admin = await getActiveAdminSession(request, supabase);
+        if (!admin) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        const authorizedEvent = await getAdminOwnedEvent(admin, event_id, supabase);
+        if (!authorizedEvent) return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 });
 
         // Get the event
-        const { data: event, error: eventError } = await supabase
+        let eventQuery = supabase
             .from("events")
             .select("*")
-            .eq("id", event_id)
-            .single();
+            .eq("id", event_id);
+        eventQuery = authorizedEvent.organization_id
+            ? eventQuery.eq("organization_id", authorizedEvent.organization_id)
+            : eventQuery.is("organization_id", null);
+        const { data: event, error: eventError } = await eventQuery.maybeSingle();
 
         if (eventError || !event) {
             return NextResponse.json(
@@ -86,10 +94,13 @@ export async function POST(request: NextRequest) {
         // Clear any existing team_clue_order for these teams (in case of restart)
         if (teams && teams.length > 0) {
             const teamIds = teams.map(t => t.id);
-            await supabase
+            const { error: deleteError } = await supabase
                 .from("team_clue_order")
                 .delete()
                 .in("team_id", teamIds);
+            if (deleteError) {
+                return NextResponse.json({ success: false, message: "Failed to clear existing clue assignments" }, { status: 500 });
+            }
 
             // Generate clue order with ROUND-ROBIN starting points
             // Each team starts with a different clue to prevent crowding
@@ -143,17 +154,25 @@ export async function POST(request: NextRequest) {
             }
 
             // Reset all teams to step 0 and score 0
-            await supabase
+            const { error: resetError } = await supabase
                 .from("teams")
                 .update({ current_step: 0, score: 0, hunt_finished_at: null })
-                .in("id", teamIds);
+                .in("id", teamIds)
+                .eq("event_id", event_id);
+            if (resetError) {
+                return NextResponse.json({ success: false, message: "Failed to reset teams for the hunt" }, { status: 500 });
+            }
         }
 
         // Set hunt_started_at to now
-        const { error: updateError } = await supabase
+        let eventUpdate = supabase
             .from("events")
             .update({ hunt_started_at: new Date().toISOString() })
             .eq("id", event_id);
+        eventUpdate = authorizedEvent.organization_id
+            ? eventUpdate.eq("organization_id", authorizedEvent.organization_id)
+            : eventUpdate.is("organization_id", null);
+        const { error: updateError } = await eventUpdate;
 
         if (updateError) {
             return NextResponse.json(

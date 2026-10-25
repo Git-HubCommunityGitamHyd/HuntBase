@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { verifyPassword } from "@/lib/utils/helpers";
+import { setPlayerSessionCookie } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
     try {
@@ -18,7 +19,7 @@ export async function POST(request: NextRequest) {
         // Find player by username in team_members table
         const { data: player, error: playerError } = await supabase
             .from("team_members")
-            .select("*")
+            .select("id, player_name, username, team_id, password_hash")
             .eq("username", username.toLowerCase())
             .single();
 
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
         // Get team info
         const { data: team, error: teamError } = await supabase
             .from("teams")
-            .select("*")
+            .select("id, event_id, team_name, score, current_step, is_disqualified, hunt_finished_at, min_players, max_players, registration_status")
             .eq("id", player.team_id)
             .single();
 
@@ -81,17 +82,36 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Return player and team data (without password hashes)
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { password_hash: _playerPw, ...safePlayer } = player;
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { password_hash: _teamPw, ...safeTeam } = team;
+        const safePlayer = {
+            id: player.id,
+            player_name: player.player_name,
+            username: player.username,
+            team_id: player.team_id,
+        };
+        const safeTeam = {
+            id: team.id,
+            event_id: team.event_id,
+            team_name: team.team_name,
+            score: team.score,
+            current_step: team.current_step,
+            is_disqualified: team.is_disqualified,
+            hunt_finished_at: team.hunt_finished_at,
+            min_players: team.min_players,
+            max_players: team.max_players,
+            registration_status: team.registration_status,
+        };
 
-        return NextResponse.json({
+        const response = NextResponse.json({
             success: true,
             message: "Login successful",
             player: safePlayer,
             team: safeTeam,
+        });
+        return setPlayerSessionCookie(response, {
+            id: player.id,
+            username: player.username,
+            role: "player",
+            team_id: team.id,
         });
     } catch (error) {
         console.error("Login error:", error);

@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
+import { getCurrentPlayerSession } from "@/lib/auth/server-session";
 
 export async function POST(request: NextRequest) {
     try {
-        const { token, team_id, player_id } = await request.json();
+        const { token, team_id } = await request.json();
 
         if (!token || !team_id) {
             return NextResponse.json(
@@ -13,6 +14,13 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const playerSession = await getCurrentPlayerSession(request, supabase);
+        if (!playerSession) {
+            return NextResponse.json({ success: false, message: "A current player session is required" }, { status: 401 });
+        }
+        if (team_id !== playerSession.team_id) {
+            return NextResponse.json({ success: false, message: "This player is not a member of that team" }, { status: 403 });
+        }
 
         // 1. Get team data
         const { data: team, error: teamError } = await supabase
@@ -123,7 +131,7 @@ export async function POST(request: NextRequest) {
                     event_id: team.event_id,
                     qr_code_id: qrCode.id,
                     team_id: team_id,
-                    player_id: player_id || null,
+                    player_id: playerSession.id,
                 });
 
             return NextResponse.json({
@@ -185,7 +193,7 @@ export async function POST(request: NextRequest) {
                 team_id,
                 clue_id: qrCode.clue_id,
                 qr_code_id: qrCode.id,
-                scanned_by: player_id || null,
+                scanned_by: playerSession.id,
                 hint_was_used: hintUsed,
             });
 

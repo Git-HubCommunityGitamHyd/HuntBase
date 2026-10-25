@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { verifyPassword } from "@/lib/utils/helpers";
-import { setSessionCookie } from "@/lib/auth/session";
+import { setAdminSessionCookie } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
     try {
@@ -17,11 +17,21 @@ export async function POST(request: NextRequest) {
         const supabase = createAdminClient();
 
         // 1. Check host_users table first (Modern multi-tenant auth)
-        const { data: hostUser, error: hostError } = await supabase
+        let { data: hostUser, error: hostError } = await supabase
             .from("host_users")
             .select("id, organization_id, email, username, full_name, role, is_active, password_hash")
-            .or(`username.eq.${username},email.eq.${username}`)
-            .single();
+            .eq("username", username)
+            .maybeSingle();
+
+        if (!hostError && !hostUser && username.includes("@")) {
+            const emailLookup = await supabase
+                .from("host_users")
+                .select("id, organization_id, email, username, full_name, role, is_active, password_hash")
+                .eq("email", username)
+                .maybeSingle();
+            hostUser = emailLookup.data;
+            hostError = emailLookup.error;
+        }
 
         if (!hostError && hostUser) {
             if (!hostUser.is_active) {
@@ -37,6 +47,23 @@ export async function POST(request: NextRequest) {
                     { success: false, message: "Invalid credentials" },
                     { status: 401 }
                 );
+            }
+
+            if (hostUser.role !== "super_admin" && hostUser.role !== "club_admin") {
+                return NextResponse.json({ success: false, message: "Account is not eligible to log in" }, { status: 403 });
+            }
+            if (hostUser.role === "club_admin" && !hostUser.organization_id) {
+                return NextResponse.json({ success: false, message: "Account organization is not configured" }, { status: 403 });
+            }
+            if (hostUser.organization_id) {
+                const { data: organization, error: organizationError } = await supabase
+                    .from("organizations")
+                    .select("id")
+                    .eq("id", hostUser.organization_id)
+                    .maybeSingle();
+                if (organizationError || !organization) {
+                    return NextResponse.json({ success: false, message: "Account organization is unavailable" }, { status: 403 });
+                }
             }
 
             // Update last login
@@ -66,7 +93,7 @@ export async function POST(request: NextRequest) {
             });
 
             // Set secure HttpOnly session cookie
-            return setSessionCookie(response, {
+            return setAdminSessionCookie(response, {
                 id: hostUser.id,
                 username: hostUser.username,
                 role: hostUser.role as "super_admin" | "club_admin",
@@ -75,9 +102,13 @@ export async function POST(request: NextRequest) {
         }
 
         // 2. Fallback to legacy teams table (where is_admin = true)
+        if (hostError) {
+            return NextResponse.json({ success: false, message: "Unable to verify administrator account" }, { status: 503 });
+        }
+
         const { data: legacyAdmin, error: legacyError } = await supabase
             .from("teams")
-            .select("*")
+            .select("id, organization_id, username, team_name, is_admin, password_hash")
             .eq("username", username)
             .eq("is_admin", true)
             .single();
@@ -99,6 +130,18 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (!legacyAdmin.organization_id) {
+            return NextResponse.json({ success: false, message: "Legacy administrator has no organization" }, { status: 403 });
+        }
+        const { data: legacyOrganization, error: legacyOrganizationError } = await supabase
+            .from("organizations")
+            .select("id")
+            .eq("id", legacyAdmin.organization_id)
+            .maybeSingle();
+        if (legacyOrganizationError || !legacyOrganization) {
+            return NextResponse.json({ success: false, message: "Legacy administrator organization is unavailable" }, { status: 403 });
+        }
+
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { password_hash: _legacyPwd, ...safeLegacyAdmin } = legacyAdmin;
 
@@ -109,11 +152,11 @@ export async function POST(request: NextRequest) {
         });
 
         // Set secure HttpOnly session cookie for legacy admin
-        return setSessionCookie(response, {
+        return setAdminSessionCookie(response, {
             id: legacyAdmin.id,
             username: legacyAdmin.username || "admin",
             role: "club_admin",
-            organization_id: (legacyAdmin as { organization_id?: string }).organization_id || "a0000000-0000-0000-0000-000000000001",
+            organization_id: legacyAdmin.organization_id,
         });
     } catch (error) {
         console.error("Admin login error:", error);

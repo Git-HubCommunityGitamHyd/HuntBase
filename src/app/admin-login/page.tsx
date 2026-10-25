@@ -22,21 +22,7 @@ export default function AdminLoginPage() {
         let isMounted = true;
 
         async function checkActiveSession() {
-            // 1. Check local storage
-            const storedAdmin = localStorage.getItem("admin");
-            if (storedAdmin) {
-                try {
-                    JSON.parse(storedAdmin);
-                    if (isMounted) {
-                        router.replace("/admin/events");
-                        return;
-                    }
-                } catch {
-                    localStorage.removeItem("admin");
-                }
-            }
-
-            // 2. Check server session cookie
+            // The server session and current account status are authoritative.
             try {
                 const res = await fetch("/api/auth/me");
                 if (res.ok) {
@@ -52,6 +38,8 @@ export default function AdminLoginPage() {
             } catch (err) {
                 console.error("Session check error:", err);
             }
+
+            localStorage.removeItem("admin");
 
             if (isMounted) {
                 setIsCheckingSession(false);

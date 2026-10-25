@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/server";
 import QRCode from "qrcode";
 import JSZip from "jszip";
 import { generateQRToken } from "@/lib/utils/helpers";
+import { getActiveAdminSession, getAdminOwnedEvent } from "@/lib/auth/server-session";
 
 export async function POST(request: NextRequest) {
     try {
@@ -16,6 +17,11 @@ export async function POST(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const admin = await getActiveAdminSession(request, supabase);
+        if (!admin) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        if (!(await getAdminOwnedEvent(admin, event_id, supabase))) {
+            return NextResponse.json({ success: false, message: "Event not found" }, { status: 404 });
+        }
 
         // Get all clues for the event
         const { data: clues, error: cluesError } = await supabase
@@ -41,7 +47,8 @@ export async function POST(request: NextRequest) {
                 .from("qr_codes")
                 .select("*")
                 .eq("clue_id", clue.id)
-                .single();
+                .eq("event_id", event_id)
+                .maybeSingle();
 
             let qrToken: string;
 

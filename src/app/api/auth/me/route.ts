@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getSession } from "@/lib/auth/session";
+import { getActiveAdminSession } from "@/lib/auth/server-session";
 import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
     try {
-        const session = getSession(request);
+        const supabase = createAdminClient();
+        const session = await getActiveAdminSession(request, supabase);
         if (!session) {
             return NextResponse.json({ success: false, admin: null }, { status: 401 });
         }
-
-        const supabase = createAdminClient();
 
         // 1. Check host_users
         const { data: hostUser } = await supabase
@@ -18,7 +17,11 @@ export async function GET(request: NextRequest) {
             .eq("id", session.id)
             .maybeSingle();
 
-        if (hostUser && hostUser.is_active) {
+        if (
+            hostUser?.is_active === true &&
+            hostUser.role === session.role &&
+            (hostUser.organization_id ?? undefined) === session.organization_id
+        ) {
             const { data: org } = await supabase
                 .from("organizations")
                 .select("id, name, slug, logo_url")
@@ -38,17 +41,20 @@ export async function GET(request: NextRequest) {
         // 2. Check legacy admin in teams
         const { data: legacyAdmin } = await supabase
             .from("teams")
-            .select("id, team_name, username, is_admin")
+            .select("id, team_name, username, is_admin, organization_id")
             .eq("id", session.id)
             .eq("is_admin", true)
             .maybeSingle();
 
-        if (legacyAdmin) {
+        if (
+            legacyAdmin?.is_admin && session.role === "club_admin" &&
+            legacyAdmin.organization_id === session.organization_id
+        ) {
             return NextResponse.json({
                 success: true,
                 admin: {
                     ...legacyAdmin,
-                    role: "super_admin",
+                    role: session.role,
                     is_admin: true,
                 },
             });

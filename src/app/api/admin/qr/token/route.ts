@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { generateQRToken } from "@/lib/utils/helpers";
+import { getActiveAdminSession, getAdminOwnedClue } from "@/lib/auth/server-session";
 
 export async function GET(request: NextRequest) {
     try {
@@ -15,15 +16,20 @@ export async function GET(request: NextRequest) {
         }
 
         const supabase = createAdminClient();
+        const admin = await getActiveAdminSession(request, supabase);
+        if (!admin) return NextResponse.json({ success: false, message: "Unauthorized" }, { status: 401 });
+        const clue = await getAdminOwnedClue(admin, clueId, supabase);
+        if (!clue) return NextResponse.json({ success: false, message: "Clue not found" }, { status: 404 });
 
         // Check if QR code already exists for this clue
         const { data: existingQR, error: fetchError } = await supabase
             .from("qr_codes")
             .select("qr_token")
             .eq("clue_id", clueId)
-            .single();
+            .eq("event_id", clue.event_id)
+            .maybeSingle();
 
-        if (fetchError && fetchError.code !== "PGRST116") {
+        if (fetchError) {
             console.error("Error fetching QR:", fetchError);
             return NextResponse.json(
                 { success: false, message: "Failed to fetch QR code" },
