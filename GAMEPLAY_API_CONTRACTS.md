@@ -153,7 +153,7 @@ All gameplay endpoints adhere to standard REST semantics and JSON payloads.
 ### 1. Fetch Current Clue & Timer Status
 `POST /api/hunt/current-clue`
 
-Returns the team's active riddle. Enforces zero data leakage (strips coordinates, location names, and secret solutions). Only exposes `hint_text` if the team has unlocked the hint penalty.
+Returns the team's active riddle. Enforces zero data leakage (strips coordinates, location names, and secret solutions). Only exposes `hint_text` if the team has unlocked the hint penalty. Automatically initializes `clue_started_at` on the first visit.
 
 - **Headers:** `Content-Type: application/json`
 - **Request Body:**
@@ -180,6 +180,7 @@ Returns the team's active riddle. Enforces zero data leakage (strips coordinates
       "clue_started_at": "2026-10-31T10:05:00.000Z",
       "hint_viewed": false,
       "hint_viewed_at": null,
+      "hint_available": false,
       "seconds_until_hint_available": 180
     },
     "totalClues": 5,
@@ -188,11 +189,13 @@ Returns the team's active riddle. Enforces zero data leakage (strips coordinates
     "event": {
       "id": "d04b3e69-0e78-43bb-a5a4-569d120a109a",
       "name": "Halloween Campus Hunt 2026",
+      "is_active": true,
       "hunt_status": "active",
+      "start_time": "2026-10-31T09:00:00.000Z",
+      "end_time": "2026-10-31T18:00:00.000Z",
       "hunt_started_at": "2026-10-31T10:00:00.000Z",
       "hunt_duration_minutes": 60,
-      "hint_delay_minutes": 5,
-      "hunt_time_remaining_seconds": 3300
+      "hint_delay_minutes": 5
     }
   }
   ```
@@ -204,12 +207,13 @@ Returns the team's active riddle. Enforces zero data leakage (strips coordinates
     "totalClues": 5,
     "currentStep": 5,
     "score": 45,
-    "hunt_finished_at": "2026-10-31T10:48:12.000Z"
+    "hunt_finished_at": "2026-10-31T10:48:12.000Z",
+    "event": { ... }
   }
   ```
 - **Error Responses:**
   - `400 Bad Request`: `{"success": false, "message": "team_id is required"}`
-  - `403 Forbidden`: `{"success": false, "message": "The hunt has not started yet"}`
+  - `403 Forbidden`: `{"success": false, "message": "Your team has been disqualified"}`
   - `404 Not Found`: `{"success": false, "message": "Team not found"}`
 
 ---
@@ -217,7 +221,7 @@ Returns the team's active riddle. Enforces zero data leakage (strips coordinates
 ### 2. View / Unlock Hint (With Score Penalty)
 `POST /api/hints/view`
 
-Unlocks the clue hint once `hint_delay_minutes` has elapsed since `clue_started_at`. Deducts 5 potential points (scan yields +5 instead of +10).
+Unlocks the clue hint once `hint_delay_minutes` has elapsed since `clue_started_at`. Deducts 5 potential points (scan yields +5 instead of +10). Enforces server-side countdown anti-cheat (cannot be bypassed).
 
 - **Headers:** `Content-Type: application/json`
 - **Request Body:**
@@ -232,7 +236,7 @@ Unlocks the clue hint once `hint_delay_minutes` has elapsed since `clue_started_
   ```json
   {
     "success": true,
-    "message": "Hint viewed! Points for this clue reduced to +5",
+    "message": "Hint unlocked! Points for this clue are reduced to +5.",
     "hint_text": "Look near the entrance of the electrical engineering department.",
     "already_viewed": false
   }
@@ -246,14 +250,16 @@ Unlocks the clue hint once `hint_delay_minutes` has elapsed since `clue_started_
   }
   ```
 - **Error Responses:**
-  - `403 Forbidden`: `{"success": false, "message": "Team is disqualified or hunt is not active"}`
+  - `400 Bad Request`: `{"success": false, "message": "You can only view hints for your team's active clue."}`
+  - `403 Forbidden`: `{"success": false, "message": "The hunt is currently paused by organizers"}`
+  - `403 Forbidden`: `{"success": false, "message": "Team has been disqualified"}`
 
 ---
 
 ### 3. Checkpoint QR Scan Processing
 `POST /api/scan`
 
-Called whenever a QR code is scanned via camera or typed manually. Handles both valid checkpoints and decoy traps.
+Called whenever a QR code is scanned via camera or typed manually. Handles valid checkpoints, anti-cheat validation, and decoy traps.
 
 - **Headers:** `Content-Type: application/json`
 - **Request Body:**
@@ -301,7 +307,7 @@ Called whenever a QR code is scanned via camera or typed manually. Handles both 
 - **Error Responses:**
   - `400 Bad Request` (Wrong Clue): `{"success": false, "message": "Wrong checkpoint! This is not your team's assigned next clue."}`
   - `400 Bad Request` (Already Scanned): `{"success": false, "message": "Your team has already verified this clue!"}`
-  - `400 Bad Request` (Hunt Already Completed): `{"success": false, "message": "Your team has already completed the hunt!"}`
+  - `400 Bad Request` (Hunt Already Completed): `{"success": false, "message": "Your team has already solved all clues and completed the hunt!"}`
   - `403 Forbidden` (Hunt Expired): `{"success": false, "message": "Time's up! The hunt has ended."}`
   - `403 Forbidden` (Hunt Paused): `{"success": false, "message": "The hunt is currently paused by organizers."}`
 
@@ -311,11 +317,13 @@ Called whenever a QR code is scanned via camera or typed manually. Handles both 
 `GET /api/hunt/leaderboard?event_id=<uuid>`
 
 Returns public-safe live standings calculated with standard competitive tie-breakers:
-1. `score` DESC
-2. `is_complete` DESC
-3. `completion_time` ASC (`hunt_finished_at` - `hunt_started_at`)
-4. `current_step` DESC
-5. `latest_scan_at` ASC
+1. Disqualified teams forced to the bottom
+2. `score` DESC
+3. `is_complete` DESC (Completed teams outrank incomplete teams with identical scores)
+4. `duration_seconds` ASC (Fastest completion speed from hunt start)
+5. `current_step` DESC
+6. Latest scan timestamp ASC
+7. Team name alphabetical fallback
 
 - **Success Response (`200 OK`):**
   ```json
@@ -324,7 +332,10 @@ Returns public-safe live standings calculated with standard competitive tie-brea
     "event": {
       "id": "d04b3e69-0e78-43bb-a5a4-569d120a109a",
       "name": "Halloween Campus Hunt 2026",
+      "is_active": true,
       "hunt_status": "active",
+      "hunt_started_at": "2026-10-31T10:00:00.000Z",
+      "hunt_duration_minutes": 60,
       "total_clues": 5
     },
     "leaderboard": [
@@ -334,9 +345,12 @@ Returns public-safe live standings calculated with standard competitive tie-brea
         "team_name": "CyberKnights",
         "score": 50,
         "current_step": 5,
+        "total_clues": 5,
         "is_complete": true,
+        "is_disqualified": false,
         "hunt_finished_at": "2026-10-31T10:42:15.000Z",
-        "duration_minutes": 42.25
+        "duration_seconds": 2535,
+        "duration_formatted": "42m 15s"
       },
       {
         "rank": 2,
@@ -344,9 +358,12 @@ Returns public-safe live standings calculated with standard competitive tie-brea
         "team_name": "ByteBandits",
         "score": 45,
         "current_step": 5,
+        "total_clues": 5,
         "is_complete": true,
+        "is_disqualified": false,
         "hunt_finished_at": "2026-10-31T10:47:00.000Z",
-        "duration_minutes": 47.00
+        "duration_seconds": 2820,
+        "duration_formatted": "47m 00s"
       },
       {
         "rank": 3,
@@ -354,9 +371,12 @@ Returns public-safe live standings calculated with standard competitive tie-brea
         "team_name": "CodeCrackers",
         "score": 30,
         "current_step": 3,
+        "total_clues": 5,
         "is_complete": false,
+        "is_disqualified": false,
         "hunt_finished_at": null,
-        "duration_minutes": null
+        "duration_seconds": null,
+        "duration_formatted": null
       }
     ]
   }
@@ -367,16 +387,18 @@ Returns public-safe live standings calculated with standard competitive tie-brea
 ### 5. Host Admin Game Control
 - **`POST /api/admin/events/start-hunt`**
   - **Body:** `{"event_id": "<uuid>"}`
-  - **Action:** Generates round-robin clue sequence for all teams, resets scores/steps to 0, sets `hunt_status: 'active'`, stamps `hunt_started_at: NOW()`.
+  - **Action:** Generates round-robin clue sequence for all teams, resets scores/steps to 0, cleans prior test scans, sets `hunt_status: 'active'`, stamps `hunt_started_at: NOW()`.
+  - **Response:** `{"success": true, "message": "...", "teamsCount": 10, "cluesCount": 5}`
 - **`POST /api/admin/events/pause-hunt`**
-  - **Body:** `{"event_id": "<uuid>"}`
+  - **Body:** `{"event_id": "<uuid>", "action": "pause" | "resume"}` (action is optional; toggles if omitted)
   - **Action:** Toggles `hunt_status` between `'paused'` and `'active'`.
+  - **Response:** `{"success": true, "message": "...", "hunt_status": "paused" | "active"}`
 - **`POST /api/admin/events/stop-hunt`**
   - **Body:** `{"event_id": "<uuid>"}`
-  - **Action:** Sets `hunt_status: 'completed'`, stamps `hunt_ended_at: NOW()`.
+  - **Action:** Sets `hunt_status: 'completed'`, stamps `hunt_ended_at: NOW()`, freezing scores.
 - **`POST /api/admin/teams/score`**
   - **Body:** `{"team_id": "<uuid>", "adjustment": 5 | -5}`
-  - **Action:** Manual referee score bonus/penalty (multiples of 5).
+  - **Action:** Manual referee score bonus/penalty (must be a multiple of 5).
 - **`POST /api/admin/qr/generate`**
   - **Body:** `{"event_id": "<uuid>"}`
   - **Action:** Generates QR tokens and returns a base64 `.zip` package containing high-res checkpoint and decoy QR codes for printing.
