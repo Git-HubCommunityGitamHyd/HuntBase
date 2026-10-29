@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
-
-// Fisher-Yates shuffle algorithm
-function shuffleArray<T>(array: T[]): T[] {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-}
+import { generateRoundRobinClueOrders } from "@/lib/gameplay/clue-order";
 
 // POST - Start the hunt for an event
 export async function POST(request: NextRequest) {
@@ -26,10 +17,10 @@ export async function POST(request: NextRequest) {
 
         const supabase = createAdminClient();
 
-        // Get the event
+        // 1. Get the event
         const { data: event, error: eventError } = await supabase
             .from("events")
-            .select("*")
+            .select("id, name, is_active, hunt_status")
             .eq("id", event_id)
             .single();
 
@@ -42,12 +33,12 @@ export async function POST(request: NextRequest) {
 
         if (!event.is_active) {
             return NextResponse.json(
-                { success: false, message: "Event must be active to start the hunt" },
+                { success: false, message: "Event must be activated before starting the hunt" },
                 { status: 400 }
             );
         }
 
-        // Get all teams for this event (non-admin only), ordered for consistent round-robin
+        // 2. Get all non-admin teams for this event
         const { data: teams, error: teamsError } = await supabase
             .from("teams")
             .select("id, team_name")
@@ -62,7 +53,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Get all clues for this event
+        // 3. Get all clues for this event
         const { data: clues, error: cluesError } = await supabase
             .from("clues")
             .select("id")
@@ -78,63 +69,42 @@ export async function POST(request: NextRequest) {
 
         if (!clues || clues.length === 0) {
             return NextResponse.json(
-                { success: false, message: "No clues found for this event. Add clues first!" },
+                { success: false, message: "No clues found for this event. Please add clues first!" },
                 { status: 400 }
             );
         }
 
-        // Clear any existing team_clue_order for these teams (in case of restart)
+        // 4. Initialize / Reset teams and clue ordering (in case of restart)
         if (teams && teams.length > 0) {
-            const teamIds = teams.map(t => t.id);
+            const teamIds = teams.map((t) => t.id);
+            const clueIds = clues.map((c) => c.id);
+
+            // Clean up previous clue orders and scans for these teams
             await supabase
                 .from("team_clue_order")
                 .delete()
                 .in("team_id", teamIds);
 
-            // Generate clue order with ROUND-ROBIN starting points
-            // Each team starts with a different clue to prevent crowding
-            const clueOrders: { team_id: string; clue_id: string; step_index: number }[] = [];
+            await supabase
+                .from("scans")
+                .delete()
+                .in("team_id", teamIds);
 
-            console.log(`Generating clue order for ${teams.length} teams with ${clues.length} clues`);
+            await supabase
+                .from("fake_qr_scans")
+                .delete()
+                .in("team_id", teamIds);
 
-            for (let teamIndex = 0; teamIndex < teams.length; teamIndex++) {
-                const team = teams[teamIndex];
+            // Generate deterministic round-robin clue sequence with randomized middle routes
+            const clueOrders = generateRoundRobinClueOrders(teamIds, clueIds);
 
-                // Calculate starting offset for this team (round-robin)
-                const startOffset = teamIndex % clues.length;
-
-                console.log(`Team ${teamIndex + 1} "${team.team_name}": starting with clue offset ${startOffset}`);
-
-                // Create rotated clue order: start from different clue, then random
-                const rotatedClues = [
-                    ...clues.slice(startOffset),
-                    ...clues.slice(0, startOffset)
-                ];
-
-                // Shuffle everything EXCEPT the first clue (keep round-robin first clue)
-                const firstClue = rotatedClues[0];
-                const remainingClues = shuffleArray(rotatedClues.slice(1));
-                const finalOrder = [firstClue, ...remainingClues];
-
-                console.log(`  First clue ID: ${firstClue.id}`);
-
-                finalOrder.forEach((clue, index) => {
-                    clueOrders.push({
-                        team_id: team.id,
-                        clue_id: clue.id,
-                        step_index: index,
-                    });
-                });
-            }
-
-            // Insert all clue orders
             if (clueOrders.length > 0) {
                 const { error: insertError } = await supabase
                     .from("team_clue_order")
                     .insert(clueOrders);
 
                 if (insertError) {
-                    console.error("Failed to create team clue orders:", insertError);
+                    console.error("Failed to insert team clue orders:", insertError);
                     return NextResponse.json(
                         { success: false, message: "Failed to generate clue orders: " + insertError.message },
                         { status: 500 }
@@ -142,17 +112,21 @@ export async function POST(request: NextRequest) {
                 }
             }
 
-            // Reset all teams to step 0 and score 0
+            // Reset all teams to score 0 and step 0
             await supabase
                 .from("teams")
                 .update({ current_step: 0, score: 0, hunt_finished_at: null })
                 .in("id", teamIds);
         }
 
-        // Set hunt_started_at to now
+        // 5. Update event status to active and stamp start time
         const { error: updateError } = await supabase
             .from("events")
-            .update({ hunt_started_at: new Date().toISOString() })
+            .update({
+                hunt_status: "active",
+                hunt_started_at: new Date().toISOString(),
+                hunt_ended_at: null,
+            })
             .eq("id", event_id);
 
         if (updateError) {
@@ -164,7 +138,9 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: `Hunt started! ${teams?.length || 0} teams are ready with ${clues.length} clues each.`,
+            message: `Hunt started! ${teams?.length || 0} teams are deployed across ${clues.length} clue checkpoints.`,
+            teamsCount: teams?.length || 0,
+            cluesCount: clues.length,
         });
     } catch (error) {
         console.error("Start hunt error:", error);

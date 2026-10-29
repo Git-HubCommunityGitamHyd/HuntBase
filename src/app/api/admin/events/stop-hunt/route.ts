@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 
-// POST - Stop the hunt for an event
+// POST - Conclude / Stop the hunt for an event
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
@@ -16,10 +16,13 @@ export async function POST(request: NextRequest) {
 
         const supabase = createAdminClient();
 
-        // Clear hunt_started_at to stop the hunt
+        // Mark hunt as completed and record end timestamp
         const { error: updateError } = await supabase
             .from("events")
-            .update({ hunt_started_at: null })
+            .update({
+                hunt_status: "completed",
+                hunt_ended_at: new Date().toISOString(),
+            })
             .eq("id", event_id);
 
         if (updateError) {
@@ -31,7 +34,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: "Hunt stopped successfully!",
+            message: "Hunt concluded successfully. Scores and final leaderboard are frozen.",
         });
     } catch (error) {
         console.error("Stop hunt error:", error);

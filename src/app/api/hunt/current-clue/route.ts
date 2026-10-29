@@ -28,10 +28,17 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (team.is_disqualified) {
+            return NextResponse.json(
+                { success: false, message: "Your team has been disqualified" },
+                { status: 403 }
+            );
+        }
+
         // 2. Fetch event details
         const { data: event, error: eventError } = await supabase
             .from("events")
-            .select("id, name, is_active, start_time, end_time, hunt_started_at, hunt_duration_minutes, hint_delay_minutes")
+            .select("id, name, is_active, hunt_status, start_time, end_time, hunt_started_at, hunt_duration_minutes, hint_delay_minutes")
             .eq("id", team.event_id)
             .single();
 
@@ -45,10 +52,12 @@ export async function POST(request: NextRequest) {
         // 3. Count total clues
         const { count: totalClues } = await supabase
             .from("clues")
-            .select("id", { count: "exact" })
+            .select("id", { count: "exact", head: true })
             .eq("event_id", team.event_id);
 
-        const isComplete = team.current_step >= (totalClues || 0);
+        const isComplete = Boolean(
+            team.hunt_finished_at || (totalClues !== null && team.current_step >= totalClues)
+        );
 
         if (isComplete) {
             return NextResponse.json({
@@ -57,6 +66,7 @@ export async function POST(request: NextRequest) {
                 totalClues: totalClues || 0,
                 currentStep: team.current_step,
                 score: team.score,
+                hunt_finished_at: team.hunt_finished_at,
                 event,
             });
         }
@@ -105,14 +115,22 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 6. Security sanitization:
+        // 6. Calculate hint availability countdown
+        const hintDelayMinutes = event.hint_delay_minutes ?? 5;
+        const hintDelayMs = hintDelayMinutes * 60 * 1000;
+        const clueStartTime = clueOrder.clue_started_at ? new Date(clueOrder.clue_started_at).getTime() : Date.now();
+        const timePassedMs = Date.now() - clueStartTime;
+        const secondsUntilHintAvailable = Math.max(0, Math.ceil((hintDelayMs - timePassedMs) / 1000));
+        const hintAvailable = secondsUntilHintAvailable === 0;
+
+        // 7. Security sanitization:
         // Do NOT return hint_text unless hint_viewed is true!
         // Do NOT return admin_notes or location_name!
         const sanitizedClue = {
             id: clue.id,
             step_number: clue.step_number,
             clue_text: clue.clue_text,
-            has_hint: !!clue.hint_text,
+            has_hint: Boolean(clue.hint_text),
             hint_text: clueOrder.hint_viewed ? clue.hint_text : null,
         };
 
@@ -126,6 +144,8 @@ export async function POST(request: NextRequest) {
                 clue_started_at: clueOrder.clue_started_at,
                 hint_viewed: clueOrder.hint_viewed,
                 hint_viewed_at: clueOrder.hint_viewed_at,
+                hint_available: hintAvailable,
+                seconds_until_hint_available: secondsUntilHintAvailable,
             },
             totalClues: totalClues || 0,
             currentStep: team.current_step,

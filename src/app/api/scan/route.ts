@@ -17,7 +17,7 @@ export async function POST(request: NextRequest) {
         // 1. Get team data
         const { data: team, error: teamError } = await supabase
             .from("teams")
-            .select("*")
+            .select("id, organization_id, event_id, score, current_step, is_disqualified, hunt_finished_at")
             .eq("id", team_id)
             .single();
 
@@ -28,7 +28,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 2. Check if team is disqualified
+        // 2. Check if team is disqualified or already completed
         if (team.is_disqualified) {
             return NextResponse.json(
                 { success: false, message: "Your team has been disqualified" },
@@ -36,14 +36,21 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        if (team.hunt_finished_at) {
+            return NextResponse.json(
+                { success: false, message: "Your team has already solved all clues and completed the hunt!" },
+                { status: 400 }
+            );
+        }
+
         // 3. Get event status
-        const { data: event } = await supabase
+        const { data: event, error: eventError } = await supabase
             .from("events")
-            .select("*")
+            .select("id, is_active, hunt_status, hunt_started_at, hunt_duration_minutes, start_time, end_time")
             .eq("id", team.event_id)
             .single();
 
-        if (!event) {
+        if (eventError || !event) {
             return NextResponse.json(
                 { success: false, message: "Event not found" },
                 { status: 404 }
@@ -66,6 +73,14 @@ export async function POST(request: NextRequest) {
             );
         }
 
+        // Check if hunt is paused
+        if (event.hunt_status === "paused") {
+            return NextResponse.json(
+                { success: false, message: "The hunt is currently paused by organizers." },
+                { status: 403 }
+            );
+        }
+
         // Check if hunt timer has expired
         const huntStartTime = new Date(event.hunt_started_at).getTime();
         const huntDuration = (event.hunt_duration_minutes || 60) * 60 * 1000;
@@ -79,18 +94,18 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Check event time window
-        const eventStartTime = new Date(event.start_time);
-        const eventEndTime = new Date(event.end_time);
+        // Check event scheduled time window
+        const eventStartTime = new Date(event.start_time).getTime();
+        const eventEndTime = new Date(event.end_time).getTime();
 
-        if (new Date() < eventStartTime) {
+        if (now < eventStartTime) {
             return NextResponse.json(
                 { success: false, message: "The event hasn't started yet" },
                 { status: 403 }
             );
         }
 
-        if (new Date() > eventEndTime) {
+        if (now > eventEndTime) {
             return NextResponse.json(
                 { success: false, message: "The event has ended" },
                 { status: 403 }
@@ -101,13 +116,12 @@ export async function POST(request: NextRequest) {
         const cleanToken = token.trim();
         const { data: qrCode, error: qrError } = await supabase
             .from("qr_codes")
-            .select("*, clue:clues(*)")
+            .select("id, clue_id, event_id, qr_token, is_fake, redirect_url, fake_label")
             .eq("qr_token", cleanToken)
             .eq("event_id", team.event_id)
             .single();
 
         if (qrError || !qrCode) {
-            console.log("QR lookup failed:", { token: cleanToken, eventId: team.event_id, error: qrError?.message });
             return NextResponse.json(
                 { success: false, message: "Invalid checkpoint QR code for this event" },
                 { status: 400 }
@@ -187,6 +201,7 @@ export async function POST(request: NextRequest) {
                 qr_code_id: qrCode.id,
                 scanned_by: player_id || null,
                 hint_was_used: hintUsed,
+                points_awarded: pointsEarned,
             });
 
         if (scanError) {
