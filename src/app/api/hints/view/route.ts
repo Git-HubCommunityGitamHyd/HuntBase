@@ -1,80 +1,97 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { teams, events, clues, teamClueOrder } from "@/db/schema";
+import { eq, and } from "drizzle-orm";
+import { requirePlayerSession, handleAuthError } from "@/lib/auth/guards";
 
 // POST - Mark a hint as viewed for a team's current clue
 export async function POST(request: NextRequest) {
     try {
-        const body = await request.json();
-        const { team_id, clue_id, player_id } = body;
+        const body = await request.json().catch(() => ({}));
+        const { clue_id } = body;
 
-        if (!team_id || !clue_id) {
+        if (!clue_id) {
             return NextResponse.json(
-                { success: false, message: "Team ID and Clue ID are required" },
+                { success: false, message: "clue_id is required" },
                 { status: 400 }
             );
         }
 
-        const supabase = createAdminClient();
+        // 1. Session Auth: Verify caller is an active player belonging to this team
+        let playerAuth;
+        try {
+            playerAuth = requirePlayerSession(request, body.team_id);
+        } catch (authErr) {
+            const authResponse = handleAuthError(authErr);
+            if (authResponse) return authResponse;
+            throw authErr;
+        }
 
-        // 1. Verify team exists and is eligible
-        const { data: team, error: teamError } = await supabase
-            .from("teams")
-            .select("id, event_id, is_disqualified, hunt_finished_at, current_step")
-            .eq("id", team_id)
-            .single();
+        const { playerId, teamId } = playerAuth;
 
-        if (teamError || !team) {
+        // 2. Fetch team
+        const [team] = await db
+            .select({
+                id: teams.id,
+                eventId: teams.eventId,
+                isDisqualified: teams.isDisqualified,
+                huntFinishedAt: teams.huntFinishedAt,
+                currentStep: teams.currentStep,
+            })
+            .from(teams)
+            .where(eq(teams.id, teamId));
+
+        if (!team) {
             return NextResponse.json(
                 { success: false, message: "Team not found" },
                 { status: 404 }
             );
         }
 
-        if (team.is_disqualified) {
+        if (team.isDisqualified) {
             return NextResponse.json(
-                { success: false, message: "Team has been disqualified" },
+                { success: false, message: "Your team has been disqualified" },
                 { status: 403 }
             );
         }
 
-        if (team.hunt_finished_at) {
+        if (team.huntFinishedAt) {
             return NextResponse.json(
-                { success: false, message: "Team has already completed the hunt" },
+                { success: false, message: "Your team has already completed the hunt" },
                 { status: 400 }
             );
         }
 
-        // 2. Fetch event timing and lifecycle status
-        const { data: event, error: eventError } = await supabase
-            .from("events")
-            .select("id, is_active, hunt_status, hunt_started_at, hunt_duration_minutes, hint_delay_minutes")
-            .eq("id", team.event_id)
-            .single();
+        // 3. Fetch event
+        const [event] = await db
+            .select({
+                id: events.id,
+                isActive: events.isActive,
+                huntStatus: events.huntStatus,
+                huntStartedAt: events.huntStartedAt,
+                huntDurationMinutes: events.huntDurationMinutes,
+                hintDelayMinutes: events.hintDelayMinutes,
+            })
+            .from(events)
+            .where(eq(events.id, team.eventId));
 
-        if (eventError || !event) {
-            return NextResponse.json(
-                { success: false, message: "Associated event not found" },
-                { status: 404 }
-            );
-        }
-
-        if (!event.is_active || !event.hunt_started_at) {
+        if (!event || !event.isActive || !event.huntStartedAt) {
             return NextResponse.json(
                 { success: false, message: "The hunt has not started yet" },
                 { status: 403 }
             );
         }
 
-        if (event.hunt_status === "paused") {
+        if (event.huntStatus === "paused") {
             return NextResponse.json(
                 { success: false, message: "The hunt is currently paused by organizers" },
                 { status: 403 }
             );
         }
 
-        // Check if global hunt timer expired
-        const huntStartTime = new Date(event.hunt_started_at).getTime();
-        const huntDurationMs = (event.hunt_duration_minutes || 60) * 60 * 1000;
+        // Global timer check
+        const huntStartTime = new Date(event.huntStartedAt).getTime();
+        const huntDurationMs = (event.huntDurationMinutes || 60) * 60 * 1000;
         if (Date.now() > huntStartTime + huntDurationMs) {
             return NextResponse.json(
                 { success: false, message: "Time's up! The hunt has concluded." },
@@ -82,56 +99,54 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 3. Get the team_clue_order record
-        const { data: clueOrder, error: clueOrderError } = await supabase
-            .from("team_clue_order")
-            .select("id, step_index, clue_started_at, hint_viewed, hint_viewed_at")
-            .eq("team_id", team_id)
-            .eq("clue_id", clue_id)
-            .single();
+        // 4. Fetch clue order record
+        const [clueOrder] = await db
+            .select()
+            .from(teamClueOrder)
+            .where(and(
+                eq(teamClueOrder.teamId, team.id),
+                eq(teamClueOrder.clueId, clue_id)
+            ));
 
-        if (clueOrderError || !clueOrder) {
+        if (!clueOrder) {
             return NextResponse.json(
                 { success: false, message: "Clue assignment not found for this team" },
                 { status: 404 }
             );
         }
 
-        // Verify this is their current step (cannot preview hints for future clues)
-        if (clueOrder.step_index !== team.current_step) {
+        if (clueOrder.stepIndex !== team.currentStep) {
             return NextResponse.json(
                 { success: false, message: "You can only view hints for your team's active clue." },
                 { status: 400 }
             );
         }
 
-        // Check if hint was already viewed
-        if (clueOrder.hint_viewed) {
-            const { data: clue } = await supabase
-                .from("clues")
-                .select("hint_text")
-                .eq("id", clue_id)
-                .single();
+        // Already unlocked check
+        if (clueOrder.hintViewed) {
+            const [clue] = await db
+                .select({ hintText: clues.hintText })
+                .from(clues)
+                .where(eq(clues.id, clue_id));
 
             return NextResponse.json({
                 success: true,
                 message: "Hint already unlocked",
                 already_viewed: true,
-                hint_text: clue?.hint_text || null,
+                hint_text: clue?.hintText || null,
             });
         }
 
-        // 4. Strict anti-cheat countdown enforcement
-        const hintDelayMinutes = event.hint_delay_minutes ?? 5;
+        // 5. Anti-cheat countdown validation
+        const hintDelayMinutes = event.hintDelayMinutes ?? 5;
         const hintDelayMs = hintDelayMinutes * 60 * 1000;
 
-        // If clue_started_at was never set, initialize it now to start the countdown
-        if (!clueOrder.clue_started_at) {
-            const now = new Date().toISOString();
-            await supabase
-                .from("team_clue_order")
-                .update({ clue_started_at: now })
-                .eq("id", clueOrder.id);
+        if (!clueOrder.clueStartedAt) {
+            const now = new Date();
+            await db
+                .update(teamClueOrder)
+                .set({ clueStartedAt: now })
+                .where(eq(teamClueOrder.id, clueOrder.id));
 
             return NextResponse.json(
                 {
@@ -143,7 +158,7 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        const clueStartTime = new Date(clueOrder.clue_started_at).getTime();
+        const clueStartTime = new Date(clueOrder.clueStartedAt).getTime();
         const timePassedMs = Date.now() - clueStartTime;
 
         if (timePassedMs < hintDelayMs) {
@@ -160,40 +175,33 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 5. Mark hint as viewed (records penalty timestamp & player)
-        const { error: updateError } = await supabase
-            .from("team_clue_order")
-            .update({
-                hint_viewed: true,
-                hint_viewed_at: new Date().toISOString(),
-                hint_viewed_by: player_id || null,
+        // 6. Record hint view
+        const now = new Date();
+        await db
+            .update(teamClueOrder)
+            .set({
+                hintViewed: true,
+                hintViewedAt: now,
+                hintViewedBy: playerId,
             })
-            .eq("id", clueOrder.id);
+            .where(eq(teamClueOrder.id, clueOrder.id));
 
-        if (updateError) {
-            return NextResponse.json(
-                { success: false, message: updateError.message },
-                { status: 500 }
-            );
-        }
-
-        // 6. Fetch sanitized hint text
-        const { data: clue } = await supabase
-            .from("clues")
-            .select("hint_text")
-            .eq("id", clue_id)
-            .single();
+        // 7. Return hint text
+        const [clue] = await db
+            .select({ hintText: clues.hintText })
+            .from(clues)
+            .where(eq(clues.id, clue_id));
 
         return NextResponse.json({
             success: true,
             message: "Hint unlocked! Points for this clue are reduced to +5.",
-            hint_text: clue?.hint_text || null,
+            hint_text: clue?.hintText || null,
             already_viewed: false,
         });
     } catch (error) {
         console.error("View hint error:", error);
         return NextResponse.json(
-            { success: false, message: "Failed to view hint" },
+            { success: false, message: "Failed to unlock hint" },
             { status: 500 }
         );
     }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/server";
 import { verifyPassword } from "@/lib/utils/helpers";
+import { setSessionCookie } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
     try {
@@ -87,11 +88,20 @@ export async function POST(request: NextRequest) {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { password_hash: _teamPw, ...safeTeam } = team;
 
-        return NextResponse.json({
+        const response = NextResponse.json({
             success: true,
             message: "Login successful",
             player: safePlayer,
             team: safeTeam,
+        });
+
+        // Set secure HttpOnly session cookie for player
+        return setSessionCookie(response, {
+            id: player.id,
+            username: player.username,
+            role: "player",
+            team_id: team.id,
+            organization_id: team.organization_id,
         });
     } catch (error) {
         console.error("Login error:", error);

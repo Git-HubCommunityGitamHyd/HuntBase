@@ -1,62 +1,83 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { teams, events, clues, teamClueOrder } from "@/db/schema";
+import { eq, and, count } from "drizzle-orm";
+import { requirePlayerSession, handleAuthError } from "@/lib/auth/guards";
 
 export async function POST(request: NextRequest) {
     try {
-        const { team_id } = await request.json();
+        const body = await request.json().catch(() => ({}));
 
-        if (!team_id) {
-            return NextResponse.json(
-                { success: false, message: "team_id is required" },
-                { status: 400 }
-            );
+        // 1. Session Auth: Validate player session
+        let playerAuth;
+        try {
+            playerAuth = requirePlayerSession(request, body.team_id);
+        } catch (authErr) {
+            const authResponse = handleAuthError(authErr);
+            if (authResponse) return authResponse;
+            throw authErr;
         }
 
-        const supabase = createAdminClient();
+        const { teamId } = playerAuth;
 
-        // 1. Fetch team
-        const { data: team, error: teamError } = await supabase
-            .from("teams")
-            .select("id, event_id, current_step, score, is_disqualified, hunt_finished_at")
-            .eq("id", team_id)
-            .single();
+        // 2. Fetch team
+        const [team] = await db
+            .select({
+                id: teams.id,
+                eventId: teams.eventId,
+                currentStep: teams.currentStep,
+                score: teams.score,
+                isDisqualified: teams.isDisqualified,
+                huntFinishedAt: teams.huntFinishedAt,
+            })
+            .from(teams)
+            .where(eq(teams.id, teamId));
 
-        if (teamError || !team) {
+        if (!team) {
             return NextResponse.json(
                 { success: false, message: "Team not found" },
                 { status: 404 }
             );
         }
 
-        if (team.is_disqualified) {
+        if (team.isDisqualified) {
             return NextResponse.json(
                 { success: false, message: "Your team has been disqualified" },
                 { status: 403 }
             );
         }
 
-        // 2. Fetch event details
-        const { data: event, error: eventError } = await supabase
-            .from("events")
-            .select("id, name, is_active, hunt_status, start_time, end_time, hunt_started_at, hunt_duration_minutes, hint_delay_minutes")
-            .eq("id", team.event_id)
-            .single();
+        // 3. Fetch event
+        const [event] = await db
+            .select({
+                id: events.id,
+                name: events.name,
+                isActive: events.isActive,
+                huntStatus: events.huntStatus,
+                startTime: events.startTime,
+                endTime: events.endTime,
+                huntStartedAt: events.huntStartedAt,
+                huntDurationMinutes: events.huntDurationMinutes,
+                hintDelayMinutes: events.hintDelayMinutes,
+            })
+            .from(events)
+            .where(eq(events.id, team.eventId));
 
-        if (eventError || !event) {
+        if (!event) {
             return NextResponse.json(
                 { success: false, message: "Event not found" },
                 { status: 404 }
             );
         }
 
-        // 3. Count total clues
-        const { count: totalClues } = await supabase
-            .from("clues")
-            .select("id", { count: "exact", head: true })
-            .eq("event_id", team.event_id);
+        // 4. Count total clues
+        const [{ totalClues }] = await db
+            .select({ totalClues: count() })
+            .from(clues)
+            .where(eq(clues.eventId, team.eventId));
 
         const isComplete = Boolean(
-            team.hunt_finished_at || (totalClues !== null && team.current_step >= totalClues)
+            team.huntFinishedAt || (totalClues > 0 && team.currentStep >= totalClues)
         );
 
         if (isComplete) {
@@ -64,74 +85,78 @@ export async function POST(request: NextRequest) {
                 success: true,
                 isComplete: true,
                 totalClues: totalClues || 0,
-                currentStep: team.current_step,
+                currentStep: team.currentStep,
                 score: team.score,
-                hunt_finished_at: team.hunt_finished_at,
+                hunt_finished_at: team.huntFinishedAt,
                 event,
             });
         }
 
-        // 4. Fetch the team's clue assignment for this step
-        let { data: clueOrder } = await supabase
-            .from("team_clue_order")
-            .select("*")
-            .eq("team_id", team.id)
-            .eq("step_index", team.current_step)
-            .single();
+        // 5. Fetch team clue assignment for current step
+        let [clueAssignment] = await db
+            .select()
+            .from(teamClueOrder)
+            .where(and(
+                eq(teamClueOrder.teamId, team.id),
+                eq(teamClueOrder.stepIndex, team.currentStep)
+            ));
 
-        if (!clueOrder) {
+        if (!clueAssignment) {
             return NextResponse.json(
                 { success: false, message: "Clue assignment not found for this step" },
                 { status: 404 }
             );
         }
 
-        // Ensure clue_started_at is initialized when the team first visits the clue
-        if (!clueOrder.clue_started_at) {
-            const now = new Date().toISOString();
-            const { data: updatedOrder } = await supabase
-                .from("team_clue_order")
-                .update({ clue_started_at: now })
-                .eq("id", clueOrder.id)
-                .select("*")
-                .single();
+        // Start clue countdown timer if this is the first visit
+        if (!clueAssignment.clueStartedAt) {
+            const now = new Date();
+            const [updated] = await db
+                .update(teamClueOrder)
+                .set({ clueStartedAt: now })
+                .where(eq(teamClueOrder.id, clueAssignment.id))
+                .returning();
 
-            if (updatedOrder) {
-                clueOrder = updatedOrder;
+            if (updated) {
+                clueAssignment = updated;
             }
         }
 
-        // 5. Fetch clue securely using admin client
-        const { data: clue, error: clueError } = await supabase
-            .from("clues")
-            .select("id, step_number, clue_text, hint_text")
-            .eq("id", clueOrder.clue_id)
-            .single();
+        // 6. Fetch clue details
+        const [clue] = await db
+            .select({
+                id: clues.id,
+                stepNumber: clues.stepNumber,
+                clueText: clues.clueText,
+                hintText: clues.hintText,
+            })
+            .from(clues)
+            .where(eq(clues.id, clueAssignment.clueId));
 
-        if (clueError || !clue) {
+        if (!clue) {
             return NextResponse.json(
                 { success: false, message: "Clue content not found" },
                 { status: 404 }
             );
         }
 
-        // 6. Calculate hint availability countdown
-        const hintDelayMinutes = event.hint_delay_minutes ?? 5;
+        // 7. Calculate hint countdown
+        const hintDelayMinutes = event.hintDelayMinutes ?? 5;
         const hintDelayMs = hintDelayMinutes * 60 * 1000;
-        const clueStartTime = clueOrder.clue_started_at ? new Date(clueOrder.clue_started_at).getTime() : Date.now();
+        const clueStartTime = clueAssignment.clueStartedAt
+            ? new Date(clueAssignment.clueStartedAt).getTime()
+            : Date.now();
         const timePassedMs = Date.now() - clueStartTime;
         const secondsUntilHintAvailable = Math.max(0, Math.ceil((hintDelayMs - timePassedMs) / 1000));
         const hintAvailable = secondsUntilHintAvailable === 0;
 
-        // 7. Security sanitization:
-        // Do NOT return hint_text unless hint_viewed is true!
-        // Do NOT return admin_notes or location_name!
+        // 8. Sanitize clue: strip locationName & adminNotes, hide hintText unless unlocked
         const sanitizedClue = {
             id: clue.id,
-            step_number: clue.step_number,
-            clue_text: clue.clue_text,
-            has_hint: Boolean(clue.hint_text),
-            hint_text: clueOrder.hint_viewed ? clue.hint_text : null,
+            step_number: clue.stepNumber,
+            clue_text: clue.clueText,
+            has_hint: Boolean(clue.hintText),
+            hint_text: clueAssignment.hintViewed ? clue.hintText : null,
         };
 
         return NextResponse.json({
@@ -139,23 +164,23 @@ export async function POST(request: NextRequest) {
             isComplete: false,
             clue: sanitizedClue,
             clueOrder: {
-                id: clueOrder.id,
-                step_index: clueOrder.step_index,
-                clue_started_at: clueOrder.clue_started_at,
-                hint_viewed: clueOrder.hint_viewed,
-                hint_viewed_at: clueOrder.hint_viewed_at,
+                id: clueAssignment.id,
+                step_index: clueAssignment.stepIndex,
+                clue_started_at: clueAssignment.clueStartedAt,
+                hint_viewed: clueAssignment.hintViewed,
+                hint_viewed_at: clueAssignment.hintViewedAt,
                 hint_available: hintAvailable,
                 seconds_until_hint_available: secondsUntilHintAvailable,
             },
             totalClues: totalClues || 0,
-            currentStep: team.current_step,
+            currentStep: team.currentStep,
             score: team.score,
             event,
         });
     } catch (error) {
-        console.error("current-clue endpoint error:", error);
+        console.error("current-clue route error:", error);
         return NextResponse.json(
-            { success: false, message: "Internal server error" },
+            { success: false, message: "Failed to fetch current clue" },
             { status: 500 }
         );
     }

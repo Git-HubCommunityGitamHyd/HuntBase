@@ -54,12 +54,23 @@ export function setSessionCookie(response: NextResponse, user: SessionUser): Nex
 }
 
 /**
- * Reads session from incoming request cookies.
+ * Reads session from incoming request cookies or Authorization header.
  */
 export function getSession(request: NextRequest): SessionUser | null {
     const cookie = request.cookies.get(SESSION_COOKIE_NAME);
-    if (!cookie?.value) return null;
-    return decodeSession(cookie.value);
+    if (cookie?.value) {
+        const session = decodeSession(cookie.value);
+        if (session) return session;
+    }
+
+    const authHeader = request.headers.get("authorization");
+    if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+        const token = authHeader.substring(7).trim();
+        const session = decodeSession(token);
+        if (session) return session;
+    }
+
+    return null;
 }
 
 /**
