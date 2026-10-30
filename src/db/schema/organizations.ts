@@ -93,23 +93,3 @@ export const passwordResetTokens = pgTable(
   (t) => [uniqueIndex("password_reset_tokens_hash_idx").on(t.tokenHash)]
 );
 
-export const sessions = pgTable(
-  "sessions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    // Only a hash of the cookie value is stored, never the value itself.
-    tokenHash: text("token_hash").notNull(),
-    // Admin sessions now. A player/team-member column is added in Group C.
-    hostUserId: uuid("host_user_id").references(() => hostUsers.id, {
-      onDelete: "cascade",
-    }),
-    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-    lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("sessions_token_hash_idx").on(t.tokenHash),
-    index("sessions_host_user_idx").on(t.hostUserId),
-    index("sessions_expires_idx").on(t.expiresAt),
-  ]
-);
