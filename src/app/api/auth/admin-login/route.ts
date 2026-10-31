@@ -1,125 +1,75 @@
+import { eq, or } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
-import { verifyPassword } from "@/lib/utils/helpers";
-import { setSessionCookie } from "@/lib/auth/session";
+import { db } from "@/db";
+import { hostUsers, organizations } from "@/db/schema";
+import { createSession, setSessionCookie } from "@/lib/auth/session";
+import { verifyPassword } from "@/lib/auth/password";
 
 export async function POST(request: NextRequest) {
-    try {
-        const { username, password } = await request.json();
+  try {
+    const body = await request.json();
+    const username = typeof body.username === "string" ? body.username.trim().toLowerCase() : "";
+    const password = typeof body.password === "string" ? body.password : "";
 
-        if (!username || !password) {
-            return NextResponse.json(
-                { success: false, message: "Username and password required" },
-                { status: 400 }
-            );
-        }
-
-        const supabase = createAdminClient();
-
-        // 1. Check host_users table first (Modern multi-tenant auth)
-        const { data: hostUser, error: hostError } = await supabase
-            .from("host_users")
-            .select("id, organization_id, email, username, full_name, role, is_active, password_hash")
-            .or(`username.eq.${username},email.eq.${username}`)
-            .single();
-
-        if (!hostError && hostUser) {
-            if (!hostUser.is_active) {
-                return NextResponse.json(
-                    { success: false, message: "Account is disabled. Contact super admin." },
-                    { status: 403 }
-                );
-            }
-
-            const isValid = await verifyPassword(password, hostUser.password_hash);
-            if (!isValid) {
-                return NextResponse.json(
-                    { success: false, message: "Invalid credentials" },
-                    { status: 401 }
-                );
-            }
-
-            // Update last login
-            await supabase
-                .from("host_users")
-                .update({ last_login_at: new Date().toISOString() })
-                .eq("id", hostUser.id);
-
-            // Fetch organization details
-            const { data: org } = await supabase
-                .from("organizations")
-                .select("id, name, slug, logo_url")
-                .eq("id", hostUser.organization_id)
-                .single();
-
-            // eslint-disable-next-line @typescript-eslint/no-unused-vars
-            const { password_hash: _pwd, ...safeUser } = hostUser;
-
-            const response = NextResponse.json({
-                success: true,
-                message: "Admin login successful",
-                admin: {
-                    ...safeUser,
-                    organization: org || null,
-                    is_admin: true,
-                },
-            });
-
-            // Set secure HttpOnly session cookie
-            return setSessionCookie(response, {
-                id: hostUser.id,
-                username: hostUser.username,
-                role: hostUser.role as "super_admin" | "club_admin",
-                organization_id: hostUser.organization_id,
-            });
-        }
-
-        // 2. Fallback to legacy teams table (where is_admin = true)
-        const { data: legacyAdmin, error: legacyError } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("username", username)
-            .eq("is_admin", true)
-            .single();
-
-        if (legacyError || !legacyAdmin) {
-            return NextResponse.json(
-                { success: false, message: "Invalid credentials" },
-                { status: 401 }
-            );
-        }
-
-        const legacyAdminData = legacyAdmin as { password_hash: string; [key: string]: unknown };
-        const isLegacyValid = await verifyPassword(password, legacyAdminData.password_hash);
-
-        if (!isLegacyValid) {
-            return NextResponse.json(
-                { success: false, message: "Invalid credentials" },
-                { status: 401 }
-            );
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        const { password_hash: _legacyPwd, ...safeLegacyAdmin } = legacyAdmin;
-
-        const response = NextResponse.json({
-            success: true,
-            message: "Admin login successful",
-            admin: safeLegacyAdmin,
-        });
-
-        // Set secure HttpOnly session cookie for legacy admin
-        return setSessionCookie(response, {
-            id: legacyAdmin.id,
-            username: legacyAdmin.username || "admin",
-            role: "club_admin",
-            organization_id: (legacyAdmin as { organization_id?: string }).organization_id || "a0000000-0000-0000-0000-000000000001",
-        });
-    } catch (error) {
-        console.error("Admin login error:", error);
-        return NextResponse.json(
-            { success: false, message: "An error occurred" },
-            { status: 500 }
-        );
+    if (!username || !password) {
+      return NextResponse.json(
+        { success: false, message: "Username and password required" },
+        { status: 400 }
+      );
     }
+
+    const [hostUser] = await db
+      .select()
+      .from(hostUsers)
+      .where(or(eq(hostUsers.username, username), eq(hostUsers.email, username)))
+      .limit(1);
+
+    if (!hostUser || !(await verifyPassword(password, hostUser.passwordHash))) {
+      return NextResponse.json(
+        { success: false, message: "Invalid credentials" },
+        { status: 401 }
+      );
+    }
+
+    if (!hostUser.isActive) {
+      return NextResponse.json(
+        { success: false, message: "Account is disabled. Contact super admin." },
+        { status: 403 }
+      );
+    }
+
+    await db.update(hostUsers).set({ lastLoginAt: new Date() }).where(eq(hostUsers.id, hostUser.id));
+
+    const [organization] = hostUser.organizationId
+      ? await db
+          .select({ id: organizations.id, name: organizations.name, slug: organizations.slug, logo_url: organizations.logoUrl })
+          .from(organizations)
+          .where(eq(organizations.id, hostUser.organizationId))
+          .limit(1)
+      : [];
+
+    const response = NextResponse.json({
+      success: true,
+      message: "Admin login successful",
+      admin: {
+        id: hostUser.id,
+        organization_id: hostUser.organizationId,
+        email: hostUser.email,
+        username: hostUser.username,
+        full_name: hostUser.fullName,
+        role: hostUser.role,
+        is_active: hostUser.isActive,
+        organization: organization ?? null,
+        is_admin: true,
+      },
+    });
+
+    return setSessionCookie(response, await createSession({ hostUserId: hostUser.id }));
+  } catch (error) {
+    console.error("Admin login error:", error);
+    return NextResponse.json(
+      { success: false, message: "An error occurred" },
+      { status: 500 }
+    );
+  }
 }

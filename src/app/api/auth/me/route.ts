@@ -1,62 +1,48 @@
+import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/db";
+import { hostUsers, organizations } from "@/db/schema";
 import { getSession } from "@/lib/auth/session";
-import { createAdminClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
-    try {
-        const session = getSession(request);
-        if (!session) {
-            return NextResponse.json({ success: false, admin: null }, { status: 401 });
-        }
-
-        const supabase = createAdminClient();
-
-        // 1. Check host_users
-        const { data: hostUser } = await supabase
-            .from("host_users")
-            .select("id, organization_id, email, username, full_name, role, is_active")
-            .eq("id", session.id)
-            .maybeSingle();
-
-        if (hostUser && hostUser.is_active) {
-            const { data: org } = await supabase
-                .from("organizations")
-                .select("id, name, slug, logo_url")
-                .eq("id", hostUser.organization_id)
-                .maybeSingle();
-
-            return NextResponse.json({
-                success: true,
-                admin: {
-                    ...hostUser,
-                    organization: org || null,
-                    is_admin: true,
-                },
-            });
-        }
-
-        // 2. Check legacy admin in teams
-        const { data: legacyAdmin } = await supabase
-            .from("teams")
-            .select("id, team_name, username, is_admin")
-            .eq("id", session.id)
-            .eq("is_admin", true)
-            .maybeSingle();
-
-        if (legacyAdmin) {
-            return NextResponse.json({
-                success: true,
-                admin: {
-                    ...legacyAdmin,
-                    role: "super_admin",
-                    is_admin: true,
-                },
-            });
-        }
-
-        return NextResponse.json({ success: false, admin: null }, { status: 401 });
-    } catch (error) {
-        console.error("Session verification error:", error);
-        return NextResponse.json({ success: false, admin: null }, { status: 500 });
+  try {
+    const session = await getSession(request);
+    if (!session || session.kind !== "admin") {
+      return NextResponse.json({ success: false, admin: null }, { status: 401 });
     }
+
+    const [hostUser] = await db
+      .select({
+        id: hostUsers.id,
+        organization_id: hostUsers.organizationId,
+        email: hostUsers.email,
+        username: hostUsers.username,
+        full_name: hostUsers.fullName,
+        role: hostUsers.role,
+        is_active: hostUsers.isActive,
+      })
+      .from(hostUsers)
+      .where(eq(hostUsers.id, session.id))
+      .limit(1);
+
+    if (!hostUser?.is_active) {
+      return NextResponse.json({ success: false, admin: null }, { status: 401 });
+    }
+
+    const [organization] = hostUser.organization_id
+      ? await db
+          .select({ id: organizations.id, name: organizations.name, slug: organizations.slug, logo_url: organizations.logoUrl })
+          .from(organizations)
+          .where(eq(organizations.id, hostUser.organization_id))
+          .limit(1)
+      : [];
+
+    return NextResponse.json({
+      success: true,
+      admin: { ...hostUser, organization: organization ?? null, is_admin: true },
+    });
+  } catch (error) {
+    console.error("Session verification error:", error);
+    return NextResponse.json({ success: false, admin: null }, { status: 500 });
+  }
 }
