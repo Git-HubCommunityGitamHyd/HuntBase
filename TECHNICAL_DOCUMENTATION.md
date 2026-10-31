@@ -12,7 +12,7 @@
 3. [Multi-Tenant Data Architecture](#multi-tenant-data-architecture)
 4. [Security & Anti-Cheat System](#security--anti-cheat-system)
 5. [Scanner Engine & Camera Lifecycle](#scanner-engine--camera-lifecycle)
-6. [Real-time WebSockets & Monitoring](#real-time-websockets--monitoring)
+6. [Polling & Monitoring](#polling--monitoring)
 7. [Storage & Custom Branding Assets](#storage--custom-branding-assets)
 8. [Setup & Migration Guide](#setup--migration-guide)
 
@@ -20,7 +20,7 @@
 
 ## 1. Architectural Overview
 
-HuntBase is an event SaaS platform enabling campus clubs to run concurrent, self-contained treasure hunts with customized branding, randomized clue orders, anti-cheat QR validation, and sub-300ms live admin monitoring.
+HuntBase is an event SaaS platform enabling campus clubs to run self-contained treasure hunts with customized branding, randomized clue orders, anti-cheat QR validation, and admin monitoring refreshed every five seconds.
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -35,10 +35,10 @@ HuntBase is an event SaaS platform enabling campus clubs to run concurrent, self
  (Secure Stripped Clue API)           (HttpOnly Session Cookies)
                │                               │
 ┌──────────────┴───────────────────────────────┴──────────────┐
-│                    Supabase Infrastructure                  │
+│                      Neon Infrastructure                    │
 │                                                             │
-│   PostgreSQL 15+ (RLS)    Storage Bucket: organization-assets
-│   (12 Public Tables)      Realtime: REPLICA IDENTITY FULL   │
+│   PostgreSQL database    Organization assets stored as bytea
+│   Drizzle SQL migrations  Polling API for live updates      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,49 +48,60 @@ HuntBase is an event SaaS platform enabling campus clubs to run concurrent, self
 
 - **Framework:** Next.js 16.1.1 (App Router, Turbopack)
 - **Runtime:** Node.js 20+
-- **Database:** Supabase PostgreSQL 15+ with transaction pooler (`port: 6543`)
+- **Database:** Neon PostgreSQL accessed through Drizzle ORM
 - **State & Context:** React 19 Contexts (`AuthContext`, `ThemeContext`)
 - **Styling:** Tailwind CSS v4 & shadcn/ui with CSS Variable Design Tokens
-- **Realtime:** `@supabase/supabase-js` Realtime Channels
+- **Live Updates:** API polling every five seconds in player and admin dashboards
 - **QR Engine:** `html5-qrcode` & `qrcode` server utilities
 
 ---
 
 ## 3. Multi-Tenant Data Architecture
 
-The database is defined in a single idempotent master file: `supabase/schema.sql`.
+The database is defined in `src/db/schema` and applied through ordered SQL migrations in `migrations/`. The current schema has 16 public tables:
 
-### Core Tables (12 Public Tables)
+| Area | Tables |
+|---|---|
+| Organization | `organizations`, `host_users`, `theme_configs`, `password_reset_tokens`, `organization_assets` |
+| Event | `events`, `event_pauses` |
+| Team and identity | `teams`, `team_members`, `sessions`, `email_verifications` |
+| Hunt | `clues`, `qr_codes`, `team_clue_order` |
+| Gameplay records | `scans`, `fake_qr_scans` |
 
-1. **`organizations`**: SaaS tenant representing the hosting student club (slug, name, logo, verified).
-2. **`host_users`**: Club organizers with roles (`super_admin`, `host`), scoped to an organization.
-3. **`theme_configs`**: Club visual tokens (primary, accent, background colors, custom CSS classes).
-4. **`password_reset_tokens`**: Time-limited recovery tokens.
-5. **`events`**: Scheduled hunt events scoped to an organization.
-6. **`teams`**: Participating groups with credentials, current clue pointers, and score totals.
-7. **`team_members`**: Roster of students per team.
-8. **`clues`**: Riddles and location points with secret coordinates and answers.
-9. **`qr_codes`**: Unique cryptographic tokens associated with clues or decoy fake traps.
-10. **`team_clue_order`**: Round-robin starting point sequences per team preventing physical crowding.
-11. **`scans`**: Checkpoint validation logs enforcing `UNIQUE(team_id, clue_id)`.
-12. **`fake_qr_scans`**: Decoy scans feeding the live Hall of Shame.
+### Tenant and gameplay relationships
+
+- An organization owns events, teams, theme configuration, and uploaded assets. `host_users.organization_id` is nullable for a platform super-admin; tenant admins use role `club_admin`.
+- Each event belongs to an organization. Teams belong to both an event and an organization. Player accounts belong to a team; player credentials are not stored on the team row.
+- Clues and QR codes belong to an event. A real QR references a clue; a decoy QR has no clue reference. `team_clue_order` assigns each team a clue sequence.
+- Sessions reference exactly one host user or player account. Email verification rows belong to player accounts.
+- Valid scans reference organization, event, team, clue, and QR; one team can score a given clue only once. Decoy scans are stored separately.
+
+### Foreign-key deletion behavior
+
+- Deleting an organization cascades to its theme configuration and assets. Organization deletion is restricted while host users, events, or teams still reference it.
+- Deleting an event cascades to its clues, QR codes, scans, and decoy scans; deletion is restricted while teams or pause records reference it.
+- Deleting a team cascades to its members, clue order, scans, and decoy scans. Deleting a player cascades to sessions, email verifications, and decoy scans; audit references from valid scans and hint records are set to null.
+- Deleting a clue cascades to QR codes, clue-order rows, and scan rows. Deleting a QR cascades to its scan records.
+- Deleting a host user cascades to its sessions and password-reset tokens.
+
+The schema source is authoritative for exact constraints and indexes; update this section whenever those definitions change.
 
 ---
 
 ## 4. Security & Anti-Cheat System
 
 ### A. Zero DevTools Data Leaks
-- Clue data is served exclusively through `GET /api/hunt/current-clue`.
+- Clue data is served through `POST /api/hunt/current-clue`.
 - Sensitive fields (`admin_notes`, `location_name`) are stripped at the server edge before transmission.
 - `hint_text` is omitted until the team explicitly claims the hint with a point penalty.
 
-### B. Row Level Security (RLS) Lockdown
-- Tables containing secrets (`clues`, `qr_codes`, `host_users`) strictly block direct `anon` SELECT queries.
-- Public directory tables (`organizations`, `theme_configs`) permit read-only queries for unauthenticated club selection.
+### B. Server-side data access
+- The application accesses Neon through server-side API routes and Drizzle; Supabase RLS policies are not part of this database setup.
+- Player clue responses are filtered by the server. Scan handling derives player and team identity from the verified HttpOnly session, not request-body IDs.
 
 ### C. Session Guards
-- Club admin paths are guarded at the network edge via `src/middleware.ts`.
-- Validates the encrypted `huntbase_session` HttpOnly cookie.
+- `src/proxy.ts` protects admin page routes. API authorization is enforced in the relevant server handlers using the `huntbase_session` HttpOnly cookie and database-backed session rows.
+- Passwords use salted scrypt hashes. Legacy unsalted SHA-256 hashes are upgraded after a successful login.
 
 ---
 
@@ -102,18 +113,16 @@ The database is defined in a single idempotent master file: `supabase/schema.sql
 
 ---
 
-## 6. Real-time WebSockets & Monitoring
+## 6. Polling & Monitoring
 
-- Tables `teams`, `events`, `scans`, and `fake_qr_scans` are enrolled in the `supabase_realtime` publication.
-- Configured with `REPLICA IDENTITY FULL` to provide sub-300ms record diffs.
-- `src/app/admin/monitor/page.tsx` uses room filtering by `event_id=eq.${selectedEvent}` to prevent network pollution.
+- The hunt, progress, and admin monitoring pages poll Neon-backed API endpoints every five seconds; the application does not use WebSockets for these updates.
 
 ---
 
 ## 7. Storage & Custom Branding Assets
 
-- **Bucket:** `organization-assets`
-- **Visibility:** Public CDN
+- **Storage:** `organization_assets` PostgreSQL table (`bytea`)
+- **Access:** Public asset endpoint at `/api/assets/{id}`
 - **Limit:** 5 MB per file
 - **MIME Types:** `image/png`, `image/jpeg`, `image/svg+xml`, `image/webp`
 - **Uploader Endpoint:** `POST /api/admin/upload-asset`
@@ -131,9 +140,12 @@ cd HuntBase
 npm install
 
 # 3. Synchronize database schema
-node scripts/migrate.js
+npm run db:migrate
 
-# 4. Start local development server
+# 4. Seed the initial super admin
+npm run db:seed
+
+# 5. Start local development server
 npm run dev
 ```
 

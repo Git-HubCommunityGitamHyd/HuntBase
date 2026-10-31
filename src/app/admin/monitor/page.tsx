@@ -12,7 +12,6 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
-import { createClient } from "@/lib/supabase/client";
 import type { Event, Team, Scan, Clue, FakeQRScan, QRCode } from "@/lib/types";
 import { formatDateTime } from "@/lib/utils/helpers";
 
@@ -38,87 +37,26 @@ export default function MonitorPage() {
 
     const fetchTeams = useCallback(async () => {
         if (!selectedEvent) return;
-
-        const supabase = createClient();
-
-        // Get teams for the event
-        const { data: teamsData } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("event_id", selectedEvent)
-            .eq("is_admin", false)
-            .order("score", { ascending: false });
-
-        // Get total clues with admin notes
-        const { data: cluesData, count } = await supabase
-            .from("clues")
-            .select("*", { count: "exact" })
-            .eq("event_id", selectedEvent)
-            .order("step_number", { ascending: true });
-
-        setClues(cluesData || []);
-        setTotalClues(count || 0);
-
-        if (teamsData) {
-            // Batch fetch all scans for this event in a single query (eliminates N+1)
-            const { data: eventScans } = await supabase
-                .from("scans")
-                .select("*")
-                .eq("event_id", selectedEvent)
-                .order("scanned_at", { ascending: false });
-
-            const latestScanByTeam = new Map();
-            if (eventScans) {
-                for (const scan of eventScans) {
-                    if (!latestScanByTeam.has(scan.team_id)) {
-                        latestScanByTeam.set(scan.team_id, scan);
-                    }
-                }
-            }
-
-            const teamsWithScans: TeamWithScan[] = teamsData.map((team: Team) => ({
-                ...team,
-                lastScan: latestScanByTeam.get(team.id) || undefined,
-            }));
-
-            setTeams(teamsWithScans);
-        }
+        const response = await fetch(`/api/admin/monitor?event_id=${encodeURIComponent(selectedEvent)}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!data.success) return;
+        setTeams(data.teams);
+        setClues(data.clues);
+        setTotalClues(data.totalClues);
+        setFakeQRScans(data.fakeScans);
     }, [selectedEvent]);
 
-    const fetchFakeQRScans = useCallback(async () => {
-        if (!selectedEvent) return;
-
-        const supabase = createClient();
-
-        // Query fake QR scans directly filtered by event_id in SQL
-        const { data: fakeScans } = await supabase
-            .from("fake_qr_scans")
-            .select(`
-                *,
-                team:teams(*),
-                qr_code:qr_codes(*)
-            `)
-            .eq("event_id", selectedEvent)
-            .order("scanned_at", { ascending: false })
-            .limit(20);
-
-        setFakeQRScans(fakeScans || []);
-    }, [selectedEvent]);
-
-    const fetchEvents = async () => {
-        const supabase = createClient();
-        const { data } = await supabase.from("events").select("*").order("created_at", { ascending: false });
+    const fetchEvents = useCallback(async () => {
+        const response = await fetch("/api/admin/events", { cache: "no-store" });
+        const result = await response.json();
+        const data = result.success ? result.data as Event[] : [];
         setEvents(data || []);
 
-        // Select active event by default
-        const activeEvent = data?.find((e: Event) => e.is_active);
-        if (activeEvent) {
-            setSelectedEvent(activeEvent.id);
-        } else if (data && data.length > 0) {
-            setSelectedEvent(data[0].id);
-        }
+        setSelectedEvent((current) => current && data.some((event) => event.id === current)
+            ? current
+            : data.find((event) => event.is_active)?.id || data[0]?.id || "");
         setIsLoading(false);
-    };
+    }, []);
 
     useEffect(() => {
         fetchEvents();
@@ -126,86 +64,11 @@ export default function MonitorPage() {
 
     useEffect(() => {
         if (selectedEvent) {
-            fetchTeams();
-            fetchFakeQRScans();
-
-            // Set up realtime subscriptions
-            const supabase = createClient();
-
-            const teamsChannel = supabase
-                .channel("monitor-teams")
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "*",
-                        schema: "public",
-                        table: "teams",
-                        filter: `event_id=eq.${selectedEvent}`,
-                    },
-                    () => {
-                        fetchTeams();
-                    }
-                )
-                .subscribe();
-
-            const scansChannel = supabase
-                .channel(`monitor-scans-${selectedEvent}`)
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "INSERT",
-                        schema: "public",
-                        table: "scans",
-                        filter: `event_id=eq.${selectedEvent}`,
-                    },
-                    () => {
-                        fetchTeams();
-                    }
-                )
-                .subscribe();
-
-            // Subscribe to fake QR scans (filtered by event_id)
-            const fakeScansChannel = supabase
-                .channel(`monitor-fake-scans-${selectedEvent}`)
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "INSERT",
-                        schema: "public",
-                        table: "fake_qr_scans",
-                        filter: `event_id=eq.${selectedEvent}`,
-                    },
-                    () => {
-                        fetchFakeQRScans();
-                    }
-                )
-                .subscribe();
-
-            // Subscribe to event updates (for hunt start/stop)
-            const eventsChannel = supabase
-                .channel("monitor-events")
-                .on(
-                    "postgres_changes",
-                    {
-                        event: "UPDATE",
-                        schema: "public",
-                        table: "events",
-                        filter: `id=eq.${selectedEvent}`,
-                    },
-                    () => {
-                        fetchEvents();
-                    }
-                )
-                .subscribe();
-
-            return () => {
-                supabase.removeChannel(teamsChannel);
-                supabase.removeChannel(scansChannel);
-                supabase.removeChannel(fakeScansChannel);
-                supabase.removeChannel(eventsChannel);
-            };
+            void fetchTeams();
+            const interval = setInterval(() => { void fetchTeams(); void fetchEvents(); }, 5000);
+            return () => clearInterval(interval);
         }
-    }, [selectedEvent, fetchTeams, fetchFakeQRScans]);
+    }, [selectedEvent, fetchTeams, fetchEvents]);
 
     // Timer effect - updates every second when hunt is active
     useEffect(() => {
@@ -233,11 +96,7 @@ export default function MonitorPage() {
     }, [events, selectedEvent]);
 
     const toggleDisqualify = async (team: Team) => {
-        const supabase = createClient();
-        await supabase
-            .from("teams")
-            .update({ is_disqualified: !team.is_disqualified })
-            .eq("id", team.id);
+        await fetch("/api/admin/teams", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: team.id, is_disqualified: !team.is_disqualified }) });
         fetchTeams();
     };
 
@@ -271,8 +130,7 @@ export default function MonitorPage() {
     const endEvent = async () => {
         if (!confirm("Are you sure you want to end this event? This will deactivate it.")) return;
 
-        const supabase = createClient();
-        await supabase.from("events").update({ is_active: false }).eq("id", selectedEvent);
+        await fetch("/api/admin/events", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selectedEvent, is_active: false }) });
         fetchEvents();
     };
 

@@ -1,71 +1,150 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash, randomBytes } from "node:crypto";
+import { and, eq, gt } from "drizzle-orm";
+import { db } from "@/db";
+import { sessions, hostUsers, teamMembers, teams } from "@/db/schema";
 
-export interface SessionUser {
-    id: string;
-    username: string;
-    role: "super_admin" | "club_admin" | "player";
-    organization_id?: string;
-    team_id?: string;
+export const SESSION_COOKIE_NAME = "huntbase_session";
+const SESSION_MAX_AGE = 60 * 60 * 24; // 24 hours, in seconds
+
+export type AdminSession = {
+  kind: "admin";
+  id: string;
+  username: string;
+  role: "super_admin" | "club_admin";
+  organizationId: string | null;
+};
+export type PlayerSession = {
+  kind: "player";
+  id: string;
+  username: string;
+  teamId: string;
+  eventId: string;
+  organizationId: string;
+  isVerified: boolean;
+};
+export type SessionUser = AdminSession | PlayerSession;
+export type SessionResolver = (request: NextRequest) => Promise<SessionUser | null>;
+
+function hashToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
-const SESSION_COOKIE_NAME = "huntbase_session";
-const SESSION_MAX_AGE = 60 * 60 * 24 * 7; // 7 days in seconds
-
-/**
- * Encodes session data to a secure base64 payload.
- */
-export function encodeSession(user: SessionUser): string {
-    const payload = JSON.stringify({
-        ...user,
-        exp: Date.now() + SESSION_MAX_AGE * 1000,
-    });
-    return Buffer.from(payload).toString("base64url");
+// Creates a session row and returns the random token to put in the cookie.
+export async function createSession(
+  owner: { hostUserId: string } | { teamMemberId: string }
+): Promise<string> {
+  const token = randomBytes(32).toString("base64url");
+  await db.insert(sessions).values({
+    tokenHash: hashToken(token),
+    hostUserId: "hostUserId" in owner ? owner.hostUserId : null,
+    teamMemberId: "teamMemberId" in owner ? owner.teamMemberId : null,
+    expiresAt: new Date(Date.now() + SESSION_MAX_AGE * 1000),
+  });
+  return token;
 }
 
-/**
- * Decodes and validates session from payload.
- */
-export function decodeSession(token: string): SessionUser | null {
-    try {
-        const json = Buffer.from(token, "base64url").toString("utf8");
-        const data = JSON.parse(json);
-        if (!data || !data.exp || Date.now() > data.exp) {
-            return null;
-        }
-        return data as SessionUser;
-    } catch {
-        return null;
-    }
+export async function getSession(request: NextRequest): Promise<SessionUser | null> {
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (!token) return null;
+
+  const [row] = await db
+    .select()
+    .from(sessions)
+    .where(and(eq(sessions.tokenHash, hashToken(token)), gt(sessions.expiresAt, new Date())))
+    .limit(1);
+  if (!row) return null;
+
+  if (row.hostUserId) {
+    const [u] = await db.select().from(hostUsers).where(eq(hostUsers.id, row.hostUserId)).limit(1);
+    if (!u || !u.isActive) return null;
+    return {
+      kind: "admin",
+      id: u.id,
+      username: u.username,
+      role: u.role as AdminSession["role"],
+      organizationId: u.organizationId,
+    };
+  }
+
+  if (row.teamMemberId) {
+    const [m] = await db
+      .select({
+        id: teamMembers.id,
+        username: teamMembers.username,
+        teamId: teamMembers.teamId,
+        eventId: teams.eventId,
+        organizationId: teams.organizationId,
+        isVerified: teamMembers.isVerified,
+      })
+      .from(teamMembers)
+      .innerJoin(teams, eq(teams.id, teamMembers.teamId))
+      .where(eq(teamMembers.id, row.teamMemberId))
+      .limit(1);
+    if (!m) return null;
+    return { kind: "player", ...m };
+  }
+  return null;
 }
 
-/**
- * Attaches the HttpOnly session cookie to an outgoing response.
- */
-export function setSessionCookie(response: NextResponse, user: SessionUser): NextResponse {
-    const token = encodeSession(user);
-    response.cookies.set(SESSION_COOKIE_NAME, token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        path: "/",
-        maxAge: SESSION_MAX_AGE,
-    });
-    return response;
+export async function destroySession(request: NextRequest): Promise<void> {
+  const token = request.cookies.get(SESSION_COOKIE_NAME)?.value;
+  if (token) await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
 }
 
-/**
- * Reads session from incoming request cookies.
- */
-export function getSession(request: NextRequest): SessionUser | null {
-    const cookie = request.cookies.get(SESSION_COOKIE_NAME);
-    if (!cookie?.value) return null;
-    return decodeSession(cookie.value);
+export function setSessionCookie(response: NextResponse, token: string): NextResponse {
+  response.cookies.set(SESSION_COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE,
+  });
+  return response;
 }
 
-/**
- * Clears the session cookie on logout.
- */
 export function clearSessionCookie(response: NextResponse): NextResponse {
-    response.cookies.delete(SESSION_COOKIE_NAME);
-    return response;
+  response.cookies.delete(SESSION_COOKIE_NAME);
+  return response;
+}
+
+// Guards: call at the top of a route. If the result is a NextResponse, return it.
+const deny = (status: number, message: string) =>
+  NextResponse.json({ success: false, message }, { status });
+
+export async function requireAdmin(
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
+): Promise<AdminSession | NextResponse> {
+  const s = await resolveSession(request);
+  if (!s || s.kind !== "admin") return deny(401, "Unauthorized: admin session required");
+  return s;
+}
+
+export async function requireSuperAdmin(
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
+): Promise<AdminSession | NextResponse> {
+  const s = await requireAdmin(request, resolveSession);
+  if (s instanceof NextResponse) return s;
+  if (s.role !== "super_admin") return deny(403, "Forbidden: super admin only");
+  return s;
+}
+
+export async function requirePlayer(request: NextRequest): Promise<PlayerSession | NextResponse> {
+  const s = await getSession(request);
+  if (!s || s.kind !== "player") return deny(401, "Unauthorized: player login required");
+  return s;
+}
+
+export async function requireVerifiedPlayer(
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
+): Promise<PlayerSession | NextResponse> {
+  const s = await resolveSession(request);
+  if (!s || s.kind !== "player") return deny(401, "Unauthorized: player login required");
+  if (!s.isVerified) {
+    return deny(403, "Verify your @student.gitam.edu email before scanning");
+  }
+  return s;
 }

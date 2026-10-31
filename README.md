@@ -11,7 +11,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 - ⏱️ **Synchronized Hunt Timer** - Admin-controlled live countdown
 - 💡 **Timed Hint System** - Time-delayed hints with score penalty balance
 - 🎭 **Rickroll Decoy QR Codes** - "Hall of Shame" tracking for decoy scans
-- 📊 **Sub-300ms Live Monitoring** - Real-time WebSocket admin dashboard
+- 📊 **Live Monitoring** - Admin dashboard refreshes from the database every five seconds
 - 📱 **Mobile-First Scanner** - Zero-latency camera scanning with Safari/Android lifecycle protection
 
 ## 🛠️ Tech Stack
@@ -20,7 +20,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 |---|---|
 | **Framework** | Next.js 16 (App Router) |
 | **Language** | TypeScript |
-| **Database** | Supabase (PostgreSQL with RLS) |
+| **Database** | Neon (PostgreSQL) with Drizzle ORM |
 | **Styling** | Tailwind CSS v4 & shadcn/ui |
 | **QR Scanning** | html5-qrcode (optimized lifecycle) |
 | **QR Generation** | qrcode (server-side SVG/PNG) |
@@ -32,7 +32,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 
 - Node.js 20+
 - npm
-- Supabase account
+- Neon account
 
 ### Installation
 
@@ -47,19 +47,23 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
    npm install
    ```
 
-3. **Set up Supabase**
-   - Create a project on [Supabase](https://supabase.com).
-   - Run the master schema in `supabase/schema.sql` via the Supabase SQL Editor or:
-     ```bash
-     node scripts/migrate.js
-     ```
-   - Add environment variables to `.env.local`:
+3. **Set up Neon**
+   - Create a PostgreSQL database on [Neon](https://neon.tech).
+   - Add the pooled and direct connection URLs to `.env.local`:
      ```env
-     NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-     NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-     SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+     DATABASE_URL=your_pooled_neon_connection_string
+     DATABASE_URL_DIRECT=your_direct_neon_connection_string
+     SEED_ADMIN_USERNAME=admin
+     SEED_ADMIN_EMAIL=admin@example.com
+     SEED_ADMIN_PASSWORD=a_long_unique_password
+     OTP_SECRET=at_least_32_random_characters
+     GITAM_EMAIL_DOMAIN=student.gitam.edu
+     RESEND_API_KEY=your_resend_api_key
+     EMAIL_FROM=HuntBase <noreply@your-verified-domain.example>
      NEXT_PUBLIC_APP_URL=http://localhost:3000
      ```
+   - In development, if `RESEND_API_KEY` is unset, the verification code is printed to the server terminal. Production requires a configured email provider.
+   - Run `npm run db:migrate` and `npm run db:seed`.
 
 4. **Run the development server**
    ```bash
@@ -85,15 +89,15 @@ src/
 ├── contexts/            # React contexts (AuthContext, ThemeContext)
 ├── lib/
 │   ├── auth/            # Session token verification
-│   ├── supabase/        # Supabase client / admin client
 │   └── types.ts         # TypeScript data contracts
-└── middleware.ts        # Route protection & HttpOnly cookie guards
+├── db/                  # Neon PostgreSQL schema and Drizzle connection
+└── proxy.ts             # Route protection & HttpOnly cookie guards
 ```
 
 ## 🎮 How It Works
 
 ### Player Flow
-1. Player logs in with their team credentials.
+1. A player registers with individual credentials for an open team, then logs in with that username and password. Username matching is case-insensitive.
 2. Views their current clue (riddle).
 3. Solves the riddle and navigates to the physical location.
 4. Scans the checkpoint QR code.
