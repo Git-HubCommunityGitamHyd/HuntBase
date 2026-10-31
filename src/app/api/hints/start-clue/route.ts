@@ -1,72 +1,26 @@
+import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { teamClueOrder } from "@/db/schema";
 
-// POST - Mark a clue as started (set clue_started_at timestamp) or get existing
+const apiOrder = (o: typeof teamClueOrder.$inferSelect) => ({
+  id: o.id, team_id: o.teamId, clue_id: o.clueId, step_index: o.stepIndex,
+  clue_started_at: o.clueStartedAt?.toISOString() ?? null,
+  hint_viewed: o.hintViewed, hint_viewed_at: o.hintViewedAt?.toISOString() ?? null,
+  hint_viewed_by: o.hintViewedBy,
+});
+
 export async function POST(request: NextRequest) {
-    try {
-        const body = await request.json();
-        const { team_id, clue_order_id } = body;
-
-        if (!team_id || !clue_order_id) {
-            return NextResponse.json(
-                { success: false, message: "Team ID and Clue Order ID are required" },
-                { status: 400 }
-            );
-        }
-
-        const supabase = createAdminClient();
-
-        // Fetch the full clue order record
-        const { data: existingClueOrder, error: fetchError } = await supabase
-            .from("team_clue_order")
-            .select("*")
-            .eq("id", clue_order_id)
-            .eq("team_id", team_id)
-            .single();
-
-        if (fetchError || !existingClueOrder) {
-            return NextResponse.json(
-                { success: false, message: "Clue order not found" },
-                { status: 404 }
-            );
-        }
-
-        // If already started, return the existing data
-        if (existingClueOrder.clue_started_at) {
-            return NextResponse.json({
-                success: true,
-                message: "Clue already started",
-                clue_order: existingClueOrder,
-            });
-        }
-
-        // Set the clue_started_at timestamp
-        const now = new Date().toISOString();
-        const { data: updatedClueOrder, error: updateError } = await supabase
-            .from("team_clue_order")
-            .update({ clue_started_at: now })
-            .eq("id", clue_order_id)
-            .eq("team_id", team_id)
-            .select("*")
-            .single();
-
-        if (updateError) {
-            return NextResponse.json(
-                { success: false, message: updateError.message },
-                { status: 500 }
-            );
-        }
-
-        return NextResponse.json({
-            success: true,
-            message: "Clue started",
-            clue_order: updatedClueOrder,
-        });
-    } catch (error) {
-        console.error("Start clue error:", error);
-        return NextResponse.json(
-            { success: false, message: "Failed to start clue" },
-            { status: 500 }
-        );
-    }
+  try {
+    const { team_id, clue_order_id } = await request.json();
+    if (!team_id || !clue_order_id) return NextResponse.json({ success: false, message: "Team ID and Clue Order ID are required" }, { status: 400 });
+    const [existing] = await db.select().from(teamClueOrder).where(and(eq(teamClueOrder.id, clue_order_id), eq(teamClueOrder.teamId, team_id))).limit(1);
+    if (!existing) return NextResponse.json({ success: false, message: "Clue order not found" }, { status: 404 });
+    if (existing.clueStartedAt) return NextResponse.json({ success: true, message: "Clue already started", clue_order: apiOrder(existing) });
+    const [updated] = await db.update(teamClueOrder).set({ clueStartedAt: new Date() }).where(and(eq(teamClueOrder.id, clue_order_id), eq(teamClueOrder.teamId, team_id))).returning();
+    return NextResponse.json({ success: true, message: "Clue started", clue_order: apiOrder(updated) });
+  } catch (error) {
+    console.error("Start clue error:", error);
+    return NextResponse.json({ success: false, message: "Failed to start clue" }, { status: 500 });
+  }
 }

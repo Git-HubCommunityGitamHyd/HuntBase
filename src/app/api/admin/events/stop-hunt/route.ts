@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, eventPauses } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { requireAdminSession, handleAuthError } from "@/lib/auth/guards";
+import { requireAdmin } from "@/lib/auth/session";
 
 // POST - Conclude / Stop the hunt for an event
 export async function POST(request: NextRequest) {
     try {
+        const auth = await requireAdmin(request);
+        if (auth instanceof NextResponse) return auth;
+
         const body = await request.json().catch(() => ({}));
         const { event_id } = body;
 
@@ -17,24 +20,31 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 1. Session Auth: Verify admin privileges and organization ownership
-        try {
-            await requireAdminSession(request, event_id);
-        } catch (authErr) {
-            const authResponse = handleAuthError(authErr);
-            if (authResponse) return authResponse;
-            throw authErr;
-        }
-
-        // 2. Atomic Transaction: Conclude hunt & close any open pause
         const result = await db.transaction(async (tx) => {
             const [event] = await tx
                 .select()
                 .from(events)
-                .where(eq(events.id, event_id));
+                .where(eq(events.id, event_id))
+                .limit(1)
+                .for("update");
 
             if (!event) {
                 return { status: 404, data: { success: false, message: "Event not found" } };
+            }
+
+            // Check organization permission (super_admin can bypass)
+            if (auth.role !== "super_admin" && auth.organizationId !== event.organizationId) {
+                return {
+                    status: 403,
+                    data: { success: false, message: "Forbidden: You do not have permission to manage this event" },
+                };
+            }
+
+            if (event.huntStatus === "completed") {
+                return {
+                    status: 400,
+                    data: { success: false, message: "Hunt is already completed" },
+                };
             }
 
             const now = new Date();
@@ -45,12 +55,13 @@ export async function POST(request: NextRequest) {
                 .set({ resumedAt: now })
                 .where(and(eq(eventPauses.eventId, event_id), isNull(eventPauses.resumedAt)));
 
-            // Mark hunt as completed
+            // Mark hunt as completed with hunt_ended_at
             await tx
                 .update(events)
                 .set({
                     huntStatus: "completed",
                     huntEndedAt: now,
+                    isActive: false,
                 })
                 .where(eq(events.id, event_id));
 
@@ -59,7 +70,7 @@ export async function POST(request: NextRequest) {
                 data: {
                     success: true,
                     message: "Hunt concluded successfully. Scores and final leaderboard are frozen.",
-                }
+                },
             };
         });
 

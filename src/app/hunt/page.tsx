@@ -8,7 +8,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import type { Team, Clue, Event, TeamClueOrder } from "@/lib/types";
-import { createClient } from "@/lib/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function HuntPage() {
@@ -28,23 +27,6 @@ export default function HuntPage() {
     const [hintText, setHintText] = useState<string | null>(null);
     const [hintLoading, setHintLoading] = useState(false);
 
-    const fetchEvent = useCallback(async (eventId: string) => {
-        try {
-            const supabase = createClient();
-            const { data } = await supabase
-                .from("events")
-                .select("*")
-                .eq("id", eventId)
-                .single();
-
-            if (data) {
-                setEvent(data);
-            }
-        } catch (error) {
-            console.error("Error fetching event:", error);
-        }
-    }, []);
-
     const fetchCurrentClue = useCallback(async (teamData: Team) => {
         try {
             const response = await fetch("/api/hunt/current-clue", {
@@ -57,6 +39,7 @@ export default function HuntPage() {
 
             if (data.success) {
                 setTotalClues(data.totalClues || 0);
+                setLocalTeam((previous) => previous ? { ...previous, current_step: data.currentStep, score: data.score } : previous);
                 if (data.event) {
                     setEvent(data.event);
                 }
@@ -92,112 +75,27 @@ export default function HuntPage() {
             return;
         }
 
-        // Fetch fresh team data from database (in case localStorage is stale)
-        const fetchFreshTeamData = async () => {
-            const supabase = createClient();
-            const { data: freshTeam } = await supabase
-                .from("teams")
-                .select("*")
-                .eq("id", team.id)
-                .single();
-
-            if (freshTeam) {
+        let active = true;
+        const refresh = async () => {
+            try {
+                const response = await fetch(`/api/teams/${team.id}`, { cache: "no-store" });
+                const data = await response.json();
+                const freshTeam = data.success ? data.team as Team : team;
+                if (!active) return;
                 setLocalTeam(freshTeam);
                 localStorage.setItem("team", JSON.stringify(freshTeam));
-                // Fetch event first, then clue
-                await fetchEvent(freshTeam.event_id);
-                fetchCurrentClue(freshTeam);
-            } else {
-                setLocalTeam(team);
-                await fetchEvent(team.event_id);
-                fetchCurrentClue(team);
+                await fetchCurrentClue(freshTeam);
+            } catch (error) {
+                console.error("Error refreshing hunt state:", error);
+            } finally {
+                if (active) setIsLoading(false);
             }
-            setIsLoading(false);
         };
-
-        fetchFreshTeamData();
-
-        // Prefetch scan page for faster navigation
+        void refresh();
         router.prefetch('/scan');
-
-        const supabase = createClient();
-
-        // Subscribe to team updates
-        const teamChannel = supabase
-            .channel("team-updates")
-            .on(
-                "postgres_changes",
-                {
-                    event: "UPDATE",
-                    schema: "public",
-                    table: "teams",
-                    filter: `id=eq.${team.id}`,
-                },
-                (payload: { new: Team }) => {
-                    const updatedTeam = payload.new;
-                    setLocalTeam(updatedTeam);
-                    localStorage.setItem("team", JSON.stringify(updatedTeam));
-                    fetchCurrentClue(updatedTeam);
-                }
-            )
-            .subscribe();
-
-        // Subscribe to event updates (for hunt start/stop)
-        const eventChannel = supabase
-            .channel("event-updates")
-            .on(
-                "postgres_changes",
-                {
-                    event: "UPDATE",
-                    schema: "public",
-                    table: "events",
-                    filter: `id=eq.${team.event_id}`,
-                },
-                (payload: { new: Event }) => {
-                    const updatedEvent = payload.new;
-                    setEvent(updatedEvent);
-                }
-            )
-            .subscribe();
-
-        // Subscribe to team_clue_order updates (for hint sync between team members)
-        const clueOrderChannel = supabase
-            .channel("clue-order-updates")
-            .on(
-                "postgres_changes",
-                {
-                    event: "UPDATE",
-                    schema: "public",
-                    table: "team_clue_order",
-                    filter: `team_id=eq.${team.id}`,
-                },
-                (payload: { new: TeamClueOrder }) => {
-                    const updatedClueOrder = payload.new;
-                    // Only update if it's the current clue
-                    setCurrentClueOrder((prev) => {
-                        if (prev && prev.id === updatedClueOrder.id) {
-                            // If hint was viewed by another team member, update state
-                            if (updatedClueOrder.hint_viewed && !showHint) {
-                                setShowHint(true);
-                                // Fetch the hint text
-                                if (currentClue?.hint_text) {
-                                    setHintText(currentClue.hint_text);
-                                }
-                            }
-                            return updatedClueOrder;
-                        }
-                        return prev;
-                    });
-                }
-            )
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(teamChannel);
-            supabase.removeChannel(eventChannel);
-            supabase.removeChannel(clueOrderChannel);
-        };
-    }, [authLoading, team, fetchCurrentClue, fetchEvent, router, showHint, currentClue?.hint_text]);
+        const interval = setInterval(() => { void refresh(); }, 5000);
+        return () => { active = false; clearInterval(interval); };
+    }, [authLoading, team, fetchCurrentClue, router]);
 
     // Timer effect - updates every second when hunt is active
     useEffect(() => {

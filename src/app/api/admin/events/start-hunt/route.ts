@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, teams, clues, teamClueOrder, scans, fakeQrScans } from "@/db/schema";
-import { eq, and, asc, inArray } from "drizzle-orm";
+import { eq, asc, inArray } from "drizzle-orm";
 import { generateRoundRobinClueOrders } from "@/lib/gameplay/clue-order";
-import { requireAdminSession, handleAuthError } from "@/lib/auth/guards";
+import { requireAdmin } from "@/lib/auth/session";
 
-// POST - Start or restart the hunt for an event (Atomic Transaction)
+// POST - Start the hunt for an event (Atomic Transaction)
 export async function POST(request: NextRequest) {
     try {
+        const auth = await requireAdmin(request);
+        if (auth instanceof NextResponse) return auth;
+
         const body = await request.json().catch(() => ({}));
         const { event_id } = body;
 
@@ -18,35 +21,38 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 1. Session Auth: Verify admin privileges and organization ownership
-        try {
-            await requireAdminSession(request, event_id);
-        } catch (authErr) {
-            const authResponse = handleAuthError(authErr);
-            if (authResponse) return authResponse;
-            throw authErr;
-        }
-
-        // 2. Atomic PostgreSQL Transaction
         const result = await db.transaction(async (tx) => {
-            // Fetch event
             const [event] = await tx
                 .select()
                 .from(events)
-                .where(eq(events.id, event_id));
+                .where(eq(events.id, event_id))
+                .limit(1)
+                .for("update");
 
             if (!event) {
                 return { status: 404, data: { success: false, message: "Event not found" } };
             }
 
-            if (!event.isActive) {
+            // Check organization permission (super_admin can bypass)
+            if (auth.role !== "super_admin" && auth.organizationId !== event.organizationId) {
                 return {
-                    status: 400,
-                    data: { success: false, message: "Event must be activated before starting the hunt" }
+                    status: 403,
+                    data: { success: false, message: "Forbidden: You do not have permission to manage this event" },
                 };
             }
 
-            // Fetch non-admin teams for this event
+            // Only allow starting from draft or scheduled status to protect live hunts
+            if (event.huntStatus !== "draft" && event.huntStatus !== "scheduled") {
+                return {
+                    status: 400,
+                    data: {
+                        success: false,
+                        message: `Cannot start hunt: event status is currently '${event.huntStatus}'. Only 'draft' or 'scheduled' hunts can be started.`,
+                    },
+                };
+            }
+
+            // Fetch competing teams for this event
             const competingTeams = await tx
                 .select({ id: teams.id, teamName: teams.teamName })
                 .from(teams)
@@ -63,7 +69,7 @@ export async function POST(request: NextRequest) {
             if (!eventClues || eventClues.length === 0) {
                 return {
                     status: 400,
-                    data: { success: false, message: "No clues found for this event. Please add clues first!" }
+                    data: { success: false, message: "No clues found for this event. Please add clues first!" },
                 };
             }
 
@@ -113,6 +119,7 @@ export async function POST(request: NextRequest) {
             await tx
                 .update(events)
                 .set({
+                    isActive: true,
                     huntStatus: "active",
                     huntStartedAt: now,
                     huntEndedAt: null,
@@ -126,7 +133,7 @@ export async function POST(request: NextRequest) {
                     message: `Hunt started! ${competingTeams.length} teams deployed across ${eventClues.length} clue checkpoints.`,
                     teamsCount: competingTeams.length,
                     cluesCount: eventClues.length,
-                }
+                },
             };
         });
 

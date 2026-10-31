@@ -7,7 +7,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import type { Team, Scan, Clue, Event } from "@/lib/types";
-import { createClient } from "@/lib/supabase/client";
 import { formatDateTime, getTimeRemaining } from "@/lib/utils/helpers";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -28,50 +27,14 @@ export default function ProgressPage() {
     }, []);
 
     const fetchData = useCallback(async (teamData: Team) => {
-        const supabase = createClient();
-
-        // Fetch fresh team data from database
-        const { data: freshTeam } = await supabase
-            .from("teams")
-            .select("*")
-            .eq("id", teamData.id)
-            .single();
-
-        if (freshTeam) {
-            setLocalTeam(freshTeam);
-            localStorage.setItem("team", JSON.stringify(freshTeam));
-        }
-
-        const { data: eventData } = await supabase
-            .from("events")
-            .select("*")
-            .eq("id", teamData.event_id)
-            .single();
-
-        if (eventData) {
-            setEvent(eventData);
-        }
-
-        const { data: clues } = await supabase
-            .from("clues")
-            .select("*")
-            .eq("event_id", teamData.event_id);
-
-        setTotalClues(clues?.length || 0);
-
-        const { data: scanData } = await supabase
-            .from("scans")
-            .select("*")
-            .eq("team_id", teamData.id)
-            .order("scanned_at", { ascending: true });
-
-        if (scanData && clues) {
-            const scansWithClues = scanData.map((scan: Scan) => ({
-                ...scan,
-                clue: clues.find((c: Clue) => c.id === scan.clue_id),
-            }));
-            setScans(scansWithClues);
-        }
+        const response = await fetch(`/api/progress?team_id=${encodeURIComponent(teamData.id)}`, { cache: "no-store" });
+        const data = await response.json();
+        if (!data.success) return;
+        setLocalTeam(data.team);
+        localStorage.setItem("team", JSON.stringify(data.team));
+        setEvent(data.event);
+        setTotalClues(data.totalClues);
+        setScans(data.scans);
     }, []);
 
     // Auth state hydration
@@ -91,25 +54,9 @@ export default function ProgressPage() {
         
         loadData();
 
-        const supabase = createClient();
-        const channel = supabase
-            .channel("progress-updates")
-            .on(
-                "postgres_changes",
-                {
-                    event: "*",
-                    schema: "public",
-                    table: "scans",
-                    filter: `team_id=eq.${team.id}`,
-                },
-                () => {
-                    fetchData(team);
-                }
-            )
-            .subscribe();
-
+        const interval = setInterval(() => { void fetchData(team); }, 5000);
         return () => {
-            supabase.removeChannel(channel);
+            clearInterval(interval);
         };
     }, [authLoading, team, fetchData]);
 

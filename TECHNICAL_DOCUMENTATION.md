@@ -35,10 +35,10 @@ HuntBase is an event SaaS platform enabling campus clubs to run concurrent, self
  (Secure Stripped Clue API)           (HttpOnly Session Cookies)
                │                               │
 ┌──────────────┴───────────────────────────────┴──────────────┐
-│                    Supabase Infrastructure                  │
+│                      Neon Infrastructure                    │
 │                                                             │
-│   PostgreSQL 15+ (RLS)    Storage Bucket: organization-assets
-│   (12 Public Tables)      Realtime: REPLICA IDENTITY FULL   │
+│   PostgreSQL database    Organization assets stored as bytea
+│   Drizzle SQL migrations  Polling API for live updates      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -48,17 +48,17 @@ HuntBase is an event SaaS platform enabling campus clubs to run concurrent, self
 
 - **Framework:** Next.js 16.1.1 (App Router, Turbopack)
 - **Runtime:** Node.js 20+
-- **Database:** Supabase PostgreSQL 15+ with transaction pooler (`port: 6543`)
+- **Database:** Neon PostgreSQL accessed through Drizzle ORM
 - **State & Context:** React 19 Contexts (`AuthContext`, `ThemeContext`)
 - **Styling:** Tailwind CSS v4 & shadcn/ui with CSS Variable Design Tokens
-- **Realtime:** `@supabase/supabase-js` Realtime Channels
+- **Live Updates:** API polling every five seconds in player and admin dashboards
 - **QR Engine:** `html5-qrcode` & `qrcode` server utilities
 
 ---
 
 ## 3. Multi-Tenant Data Architecture
 
-The database is defined in a single idempotent master file: `supabase/schema.sql`.
+The database is defined in `src/db/schema` and applied through the SQL migrations in `migrations/`.
 
 ### Core Tables (12 Public Tables)
 
@@ -104,16 +104,14 @@ The database is defined in a single idempotent master file: `supabase/schema.sql
 
 ## 6. Real-time WebSockets & Monitoring
 
-- Tables `teams`, `events`, `scans`, and `fake_qr_scans` are enrolled in the `supabase_realtime` publication.
-- Configured with `REPLICA IDENTITY FULL` to provide sub-300ms record diffs.
-- `src/app/admin/monitor/page.tsx` uses room filtering by `event_id=eq.${selectedEvent}` to prevent network pollution.
+- The hunt, progress, and admin monitoring pages poll Neon-backed API endpoints every five seconds.
 
 ---
 
 ## 7. Storage & Custom Branding Assets
 
-- **Bucket:** `organization-assets`
-- **Visibility:** Public CDN
+- **Storage:** `organization_assets` PostgreSQL table (`bytea`)
+- **Access:** Public asset endpoint at `/api/assets/{id}`
 - **Limit:** 5 MB per file
 - **MIME Types:** `image/png`, `image/jpeg`, `image/svg+xml`, `image/webp`
 - **Uploader Endpoint:** `POST /api/admin/upload-asset`
@@ -131,9 +129,12 @@ cd HuntBase
 npm install
 
 # 3. Synchronize database schema
-node scripts/migrate.js
+npm run db:migrate
 
-# 4. Start local development server
+# 4. Seed the initial super admin
+npm run db:seed
+
+# 5. Start local development server
 npm run dev
 ```
 

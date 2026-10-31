@@ -66,5 +66,15 @@ export const teamMembers = pgTable(
     isVerified: boolean("is_verified").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("team_members_team_idx").on(t.teamId)]
+    (t) => [
+    index("team_members_team_idx").on(t.teamId),
+    // One verified account per email address.
+    uniqueIndex("team_members_verified_email_idx")
+      .on(sql`lower(${t.gitamEmail})`)
+      .where(sql`${t.isVerified}`),
+    check(
+      "team_members_verified_email_check",
+      sql`not ${t.isVerified} or ${t.gitamEmail} is not null`
+    ),
+  ]
 );

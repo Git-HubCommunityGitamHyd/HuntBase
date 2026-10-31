@@ -2,11 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, eventPauses } from "@/db/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { requireAdminSession, handleAuthError } from "@/lib/auth/guards";
+import { requireAdmin } from "@/lib/auth/session";
 
 // POST - Pause or Resume an active hunt
 export async function POST(request: NextRequest) {
     try {
+        const auth = await requireAdmin(request);
+        if (auth instanceof NextResponse) return auth;
+
         const body = await request.json().catch(() => ({}));
         const { event_id, action } = body;
 
@@ -17,30 +20,33 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // 1. Session Auth: Verify admin privileges and organization ownership
-        try {
-            await requireAdminSession(request, event_id);
-        } catch (authErr) {
-            const authResponse = handleAuthError(authErr);
-            if (authResponse) return authResponse;
-            throw authErr;
-        }
-
-        // 2. Atomic Transaction: Update hunt status & manage event_pauses record
         const result = await db.transaction(async (tx) => {
             const [event] = await tx
                 .select()
                 .from(events)
-                .where(eq(events.id, event_id));
+                .where(eq(events.id, event_id))
+                .limit(1)
+                .for("update");
 
             if (!event) {
                 return { status: 404, data: { success: false, message: "Event not found" } };
             }
 
-            if (!event.huntStartedAt) {
+            // Check organization permission (super_admin can bypass)
+            if (auth.role !== "super_admin" && auth.organizationId !== event.organizationId) {
+                return {
+                    status: 403,
+                    data: { success: false, message: "Forbidden: You do not have permission to manage this event" },
+                };
+            }
+
+            if (event.huntStatus !== "active" && event.huntStatus !== "paused") {
                 return {
                     status: 400,
-                    data: { success: false, message: "Cannot pause a hunt that has not been started yet" }
+                    data: {
+                        success: false,
+                        message: `Cannot pause/resume hunt in '${event.huntStatus}' status. Hunt must be 'active' or 'paused'.`,
+                    },
                 };
             }
 
@@ -56,7 +62,7 @@ export async function POST(request: NextRequest) {
             const now = new Date();
 
             if (newStatus === "paused") {
-                // Check if an open pause already exists
+                // Check if an open pause already exists (one open pause per event)
                 const [openPause] = await tx
                     .select()
                     .from(eventPauses)
@@ -93,7 +99,7 @@ export async function POST(request: NextRequest) {
                     success: true,
                     message,
                     hunt_status: newStatus,
-                }
+                },
             };
         });
 

@@ -54,7 +54,7 @@ flowchart LR
 
 ### Administrative & Management Endpoints
 - `POST /api/auth/admin-login`: Host authentication and HttpOnly session cookie issuance.
-- `POST /api/admin/upload-asset`: Multipart upload for club logos and banners to Supabase Storage.
+- `POST /api/admin/upload-asset`: Multipart upload for club logos and banners into Neon-backed asset storage.
 - `GET / POST /api/admin/events`: Event creation and lifecycle control.
 - `POST /api/admin/events/start-hunt`: Triggers round-robin clue distribution and starts countdown.
 - `POST /api/admin/events/stop-hunt`: Terminates event timer and locks participant progress.

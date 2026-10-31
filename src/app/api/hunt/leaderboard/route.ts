@@ -4,6 +4,15 @@ import { events, teams, clues, scans } from "@/db/schema";
 import { eq, count, desc } from "drizzle-orm";
 import { computeLeaderboard, RawTeamProgress } from "@/lib/gameplay/leaderboard";
 
+interface CacheEntry {
+    data: unknown;
+    expiresAt: number;
+}
+
+// In-memory cache with 5s TTL to absorb rapid polling surges
+const leaderboardCache = new Map<string, CacheEntry>();
+const CACHE_TTL_MS = 5000;
+
 export async function GET(request: NextRequest) {
     try {
         const { searchParams } = new URL(request.url);
@@ -14,6 +23,14 @@ export async function GET(request: NextRequest) {
                 { success: false, message: "event_id is required" },
                 { status: 400 }
             );
+        }
+
+        const now = Date.now();
+        const cached = leaderboardCache.get(eventId);
+        if (cached && cached.expiresAt > now) {
+            return NextResponse.json(cached.data, {
+                headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=10" },
+            });
         }
 
         // 1. Fetch event metadata
@@ -42,7 +59,7 @@ export async function GET(request: NextRequest) {
             .from(clues)
             .where(eq(clues.eventId, eventId));
 
-        // 3. Fetch competing teams
+        // 3. Fetch competing teams (teams.isAdmin no longer exists)
         const competingTeams = await db
             .select({
                 id: teams.id,
@@ -90,7 +107,7 @@ export async function GET(request: NextRequest) {
             event.huntStartedAt ? event.huntStartedAt.toISOString() : null
         );
 
-        return NextResponse.json({
+        const responsePayload = {
             success: true,
             event: {
                 id: event.id,
@@ -102,6 +119,15 @@ export async function GET(request: NextRequest) {
                 total_clues: totalClues ?? 0,
             },
             leaderboard,
+        };
+
+        leaderboardCache.set(eventId, {
+            data: responsePayload,
+            expiresAt: now + CACHE_TTL_MS,
+        });
+
+        return NextResponse.json(responsePayload, {
+            headers: { "Cache-Control": "public, s-maxage=5, stale-while-revalidate=10" },
         });
     } catch (error) {
         console.error("Leaderboard route error:", error);
