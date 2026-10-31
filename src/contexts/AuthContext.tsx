@@ -72,12 +72,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         localStorage.setItem("team", JSON.stringify(newTeam));
     };
 
-    const logout = () => {
-        setPlayer(null);
-        setTeam(null);
-        localStorage.removeItem("player");
-        localStorage.removeItem("team");
-        router.push("/login");
+    const logout = async () => {
+    
+    try {
+        const res = await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+    } catch (err) {
+        console.error("logout request failed:", err);
+    }
+    setPlayer(null);
+    setTeam(null);
+    localStorage.removeItem("player");
+    localStorage.removeItem("team");
+    router.push("/login");
     };
 
     const refreshTeam = async () => {
