@@ -24,6 +24,7 @@ export type PlayerSession = {
   isVerified: boolean;
 };
 export type SessionUser = AdminSession | PlayerSession;
+export type SessionResolver = (request: NextRequest) => Promise<SessionUser | null>;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -111,14 +112,20 @@ export function clearSessionCookie(response: NextResponse): NextResponse {
 const deny = (status: number, message: string) =>
   NextResponse.json({ success: false, message }, { status });
 
-export async function requireAdmin(request: NextRequest): Promise<AdminSession | NextResponse> {
-  const s = await getSession(request);
+export async function requireAdmin(
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
+): Promise<AdminSession | NextResponse> {
+  const s = await resolveSession(request);
   if (!s || s.kind !== "admin") return deny(401, "Unauthorized: admin session required");
   return s;
 }
 
-export async function requireSuperAdmin(request: NextRequest): Promise<AdminSession | NextResponse> {
-  const s = await requireAdmin(request);
+export async function requireSuperAdmin(
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
+): Promise<AdminSession | NextResponse> {
+  const s = await requireAdmin(request, resolveSession);
   if (s instanceof NextResponse) return s;
   if (s.role !== "super_admin") return deny(403, "Forbidden: super admin only");
   return s;
@@ -131,10 +138,11 @@ export async function requirePlayer(request: NextRequest): Promise<PlayerSession
 }
 
 export async function requireVerifiedPlayer(
-  request: NextRequest
+  request: NextRequest,
+  resolveSession: SessionResolver = getSession
 ): Promise<PlayerSession | NextResponse> {
-  const s = await requirePlayer(request);
-  if (s instanceof NextResponse) return s;
+  const s = await resolveSession(request);
+  if (!s || s.kind !== "player") return deny(401, "Unauthorized: player login required");
   if (!s.isVerified) {
     return deny(403, "Verify your @student.gitam.edu email before scanning");
   }

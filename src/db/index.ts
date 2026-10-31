@@ -5,7 +5,9 @@ import * as schema from "./schema";
 const globalForDb = globalThis as unknown as { pgPool?: Pool };
 
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set");
+  throw new Error(
+    "DATABASE_URL is required to connect to PostgreSQL. Configure it in the environment; no localhost fallback is used."
+  );
 }
 
 const pool =

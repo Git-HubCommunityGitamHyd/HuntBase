@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "test": "tsx --test src/lib/auth/password.test.ts src/lib/auth/session.test.ts src/lib/auth/otp.test.ts src/lib/email.test.ts src/app/api/scan/route.test.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio",

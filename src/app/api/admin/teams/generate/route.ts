@@ -2,7 +2,8 @@ import { asc, count, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clues, events, teamClueOrder, teamMembers, teams } from "@/db/schema";
-import { generatePassword, generateUsername, hashPassword, shuffleArray } from "@/lib/utils/helpers";
+import { generatePassword, generateUsername, shuffleArray } from "@/lib/utils/helpers";
+import { hashPassword } from "@/lib/auth/password";
 
 export async function POST(request: NextRequest) {
   try {

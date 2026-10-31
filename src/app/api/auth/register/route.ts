@@ -2,7 +2,8 @@ import { count, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, teamMembers, teams } from "@/db/schema";
-import { hashPassword } from "@/lib/utils/helpers";
+import { hashPassword } from "@/lib/auth/password";
+import { isUniqueViolation } from "@/lib/db-errors";
 
 // POST - Register a new player
 export async function POST(request: NextRequest) {
@@ -111,8 +112,7 @@ export async function POST(request: NextRequest) {
       },
     });
   } catch (error) {
-    // PostgreSQL unique violation (username taken by a concurrent registration).
-    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
+    if (isUniqueViolation(error)) {
       return NextResponse.json(
         { success: false, message: "Username already taken. Please choose another." },
         { status: 400 }
