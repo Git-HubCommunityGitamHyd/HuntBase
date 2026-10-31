@@ -73,7 +73,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
 
     const logout = async () => {
-    
     try {
         const res = await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
     } catch (err) {
