@@ -1,18 +1,33 @@
 import { and, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clues, events, teamClueOrder, teams } from "@/db/schema";
+import { clues, eventPauses, events, teamClueOrder, teams } from "@/db/schema";
 import { requirePlayer } from "@/lib/auth/session";
+import { calculateClueActiveElapsedMinutes, validateHuntActiveState } from "@/lib/gameplay/hunt-lifecycle";
 
 export async function POST(request: NextRequest) {
     try {
-        // High-priority Issue 3: Authenticate and derive player and team from verified session
+        // High-priority Issue 3 & Critical Issue 1: Authenticate and derive player and team from verified session
         const auth = await requirePlayer(request);
         if (auth instanceof NextResponse) return auth;
 
         const body = await request.json().catch(() => ({}));
-        const { clue_id } = body;
 
+        // Reject client-supplied identity mismatches
+        if (body.team_id && body.team_id !== auth.teamId) {
+            return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+        }
+        if (body.teamId && body.teamId !== auth.teamId) {
+            return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+        }
+        if (body.player_id && body.player_id !== auth.id) {
+            return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+        }
+        if (body.playerId && body.playerId !== auth.id) {
+            return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+        }
+
+        const { clue_id } = body;
         if (!clue_id) {
             return NextResponse.json(
                 { success: false, message: "Clue ID is required" },
@@ -38,26 +53,18 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ success: false, message: "Team is disqualified" }, { status: 403 });
         }
 
-        // High-priority Issue 2: Reject requests when hunt is inactive, paused, or completed
-        if (team.event.huntStatus === "paused") {
-            return NextResponse.json(
-                { success: false, message: "The hunt is currently paused by organizers. Hints are unavailable." },
-                { status: 403 }
-            );
-        }
+        const now = new Date();
 
-        if (team.event.huntStatus === "completed") {
-            return NextResponse.json(
-                { success: false, message: "The hunt has concluded. Hints are no longer available." },
-                { status: 403 }
-            );
-        }
+        // Fetch pauses for pause-adjusted lifecycle validation and timer calculation
+        const pauses = await db
+            .select({ pausedAt: eventPauses.pausedAt, resumedAt: eventPauses.resumedAt })
+            .from(eventPauses)
+            .where(eq(eventPauses.eventId, team.event.id));
 
-        if (!team.event.isActive || team.event.huntStatus !== "active" || !team.event.huntStartedAt) {
-            return NextResponse.json(
-                { success: false, message: "The hunt has not started yet. Hints are unavailable." },
-                { status: 403 }
-            );
+        // Centralized hunt active check: rejects paused, completed, unstarted, and expired hunts
+        const validation = validateHuntActiveState(team.event, pauses, now);
+        if (!validation.allowed) {
+            return NextResponse.json({ success: false, message: validation.message }, { status: validation.status });
         }
 
         const [order] = await db
@@ -85,14 +92,13 @@ export async function POST(request: NextRequest) {
             });
         }
 
-        // Enforce anti-cheat hint delay
-        const delay = team.event.hintDelayMinutes ?? 5;
-        const now = Date.now();
-        const startedAt = order.clueStartedAt ? order.clueStartedAt.getTime() : now;
-        const elapsedMinutes = (now - startedAt) / 60000;
+        // Enforce anti-cheat hint delay excluding paused time
+        const delayMinutes = team.event.hintDelayMinutes ?? 5;
+        const startedAt = order.clueStartedAt ?? now;
+        const activeElapsedMinutes = calculateClueActiveElapsedMinutes(startedAt, now, pauses);
 
-        if (elapsedMinutes < delay) {
-            const remainingMinutes = Math.ceil(delay - elapsedMinutes);
+        if (activeElapsedMinutes < delayMinutes) {
+            const remainingMinutes = Math.ceil(delayMinutes - activeElapsedMinutes);
             return NextResponse.json(
                 { success: false, message: `Hint not available yet. Please wait ${remainingMinutes} more minute${remainingMinutes > 1 ? "s" : ""}.` },
                 { status: 400 }
@@ -104,7 +110,7 @@ export async function POST(request: NextRequest) {
             .update(teamClueOrder)
             .set({
                 hintViewed: true,
-                hintViewedAt: new Date(),
+                hintViewedAt: now,
                 hintViewedBy: playerId,
             })
             .where(eq(teamClueOrder.id, order.id));
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: "Hint unlocked! Points for this clue are reduced to +5",
+            message: "Hint unlocked! A penalty of 5 points will apply upon checkpoint completion.",
             hint_text: clue?.hintText ?? null,
         });
     } catch (error) {

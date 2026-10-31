@@ -44,3 +44,7 @@ next-env.d.ts
 # agent skills & lock
 .agents/
 skills-lock.json
+ 
+# reports and pdfs
+*.pdf
+reports/

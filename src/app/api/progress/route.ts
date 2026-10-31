@@ -68,13 +68,11 @@ export async function GET(request: NextRequest) {
             event_id: team.eventId,
             team_name: team.teamName,
             score: team.score,
-            is_disqualified: team.isDisqualified,
             current_step: team.currentStep,
-            created_at: team.createdAt.toISOString(),
-            min_players: team.minPlayers,
-            max_players: team.maxPlayers,
-            registration_status: team.registrationStatus,
+            is_disqualified: team.isDisqualified,
             hunt_finished_at: team.huntFinishedAt?.toISOString() ?? null,
+            created_at: team.createdAt.toISOString(),
+            players: [],
         };
 
         const eventData = {
@@ -83,10 +81,10 @@ export async function GET(request: NextRequest) {
             name: event.name,
             start_time: event.startTime.toISOString(),
             end_time: event.endTime.toISOString(),
-            is_active: event.isActive,
-            hunt_status: event.huntStatus,
             hunt_started_at: event.huntStartedAt?.toISOString() ?? null,
             hunt_ended_at: event.huntEndedAt?.toISOString() ?? null,
+            is_active: event.isActive,
+            hunt_status: event.huntStatus,
             hunt_duration_minutes: event.huntDurationMinutes,
             hint_delay_minutes: event.hintDelayMinutes,
             default_min_players: event.defaultMinPlayers,
@@ -94,7 +92,7 @@ export async function GET(request: NextRequest) {
             created_at: event.createdAt.toISOString(),
         };
 
-        // High-priority Issue 4: Never expose secret clue information, admin notes, or coordinates to players
+        // High-priority Issue 8: Keep location and admin notes strictly hidden according to player disclosure policy
         const solvedClueIds = new Set(scanRows.map((s) => s.clueId));
 
         const safeClueData = clueRows.map((c) => {
@@ -111,7 +109,7 @@ export async function GET(request: NextRequest) {
                 };
             }
 
-            // For players: only show clues they have already solved, and strip admin notes & location name
+            // For players: NEVER expose location_name or admin_notes, even for solved clues
             const isSolved = solvedClueIds.has(c.id);
             return {
                 id: c.id,
@@ -119,8 +117,8 @@ export async function GET(request: NextRequest) {
                 step_number: c.stepNumber,
                 clue_text: isSolved ? c.clueText : "Locked Checkpoint",
                 hint_text: isSolved ? c.hintText : null,
-                location_name: isSolved ? c.locationName : null,
-                admin_notes: null, // Always stripped for players
+                location_name: null, // Strictly null for players (Item 8)
+                admin_notes: null,   // Strictly null for players
                 created_at: c.createdAt.toISOString(),
             };
         });
@@ -145,10 +143,12 @@ export async function GET(request: NextRequest) {
             event: eventData,
             clues: safeClueData,
             scans: scansData,
-            totalClues: clueRows.length,
         });
     } catch (error) {
         console.error("Progress fetch error:", error);
-        return NextResponse.json({ success: false, message: "Failed to fetch progress" }, { status: 500 });
+        return NextResponse.json(
+            { success: false, message: "Failed to fetch team progress" },
+            { status: 500 }
+        );
     }
 }

@@ -2,20 +2,37 @@ import { asc, count, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { clues, events, teamClueOrder, teamMembers, teams } from "@/db/schema";
-import { generatePassword, generateUsername, hashPassword, shuffleArray } from "@/lib/utils/helpers";
+import { generatePassword, generateUsername, shuffleArray } from "@/lib/utils/helpers";
+import { hashPassword } from "@/lib/auth/password";
+import { requireAdmin } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
   try {
-    const { event_id, count: teamCount, prefix } = await request.json();
+    const auth = await requireAdmin(request);
+    if (auth instanceof NextResponse) return auth;
+
+    const body = await request.json().catch(() => ({}));
+    const { event_id, count: teamCount, prefix } = body;
     if (!event_id || !teamCount) return NextResponse.json({ success: false, message: "Event ID and count are required" }, { status: 400 });
     if (!Number.isInteger(teamCount) || teamCount < 1 || teamCount > 100) return NextResponse.json({ success: false, message: "Count must be between 1 and 100" }, { status: 400 });
+
     const result = await db.transaction(async (tx) => {
       const [event] = await tx.select().from(events).where(eq(events.id, event_id)).limit(1);
       if (!event) return { error: "Event not found", status: 404 };
+
+      if (auth.role !== "super_admin" && auth.organizationId !== event.organizationId) {
+        return {
+          error: "Forbidden: You do not have permission to generate teams for this event",
+          status: 403,
+        };
+      }
+
       const clueRows = await tx.select({ id: clues.id }).from(clues).where(eq(clues.eventId, event_id)).orderBy(asc(clues.stepNumber));
       if (!clueRows.length) return { error: "No clues found for this event. Add clues first.", status: 400 };
+
       const [{ existingCount }] = await tx.select({ existingCount: count() }).from(teams).where(eq(teams.eventId, event_id));
       const credentials = [];
+
       for (let i = 0; i < teamCount; i++) {
         const teamNumber = existingCount + i + 1;
         const teamName = `Team ${teamNumber}`;
@@ -26,8 +43,10 @@ export async function POST(request: NextRequest) {
         await tx.insert(teamClueOrder).values(shuffleArray(clueRows).map((clue, stepIndex) => ({ teamId: team.id, clueId: clue.id, stepIndex })));
         credentials.push({ team_name: teamName, username, password });
       }
+
       return { credentials };
     });
+
     if ("error" in result) return NextResponse.json({ success: false, message: result.error }, { status: result.status });
     return NextResponse.json({ success: true, message: `Successfully created ${teamCount} teams`, credentials: result.credentials });
   } catch (error) {

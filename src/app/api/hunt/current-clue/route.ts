@@ -1,14 +1,31 @@
 import { and, count, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { clues, events, teamClueOrder, teams } from "@/db/schema";
+import { clues, eventPauses, events, teamClueOrder, teams } from "@/db/schema";
 import { requirePlayer } from "@/lib/auth/session";
+import { validateHuntActiveState } from "@/lib/gameplay/hunt-lifecycle";
 
 export async function POST(request: NextRequest) {
   try {
-    // High-priority Issue 3: Authenticate request and derive team from verified player session
+    // High-priority Issue 3 & Critical Issue 1: Authenticate request and derive team from verified player session
     const auth = await requirePlayer(request);
     if (auth instanceof NextResponse) return auth;
+
+    const body = await request.json().catch(() => ({}));
+
+    // Reject forged / mismatched client-supplied identity fields
+    if (body.team_id && body.team_id !== auth.teamId) {
+      return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+    }
+    if (body.teamId && body.teamId !== auth.teamId) {
+      return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+    }
+    if (body.player_id && body.player_id !== auth.id) {
+      return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+    }
+    if (body.playerId && body.playerId !== auth.id) {
+      return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+    }
 
     const teamId = auth.teamId;
 
@@ -53,10 +70,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: false, message: "Clue assignment not found for this step" }, { status: 404 });
     }
 
-    if (!order.clueStartedAt) {
+    // Only auto-start clue if hunt is currently active
+    const now = new Date();
+    const pauses = await db
+      .select({ pausedAt: eventPauses.pausedAt, resumedAt: eventPauses.resumedAt })
+      .from(eventPauses)
+      .where(eq(eventPauses.eventId, event.id));
+
+    const validation = validateHuntActiveState(event, pauses, now);
+
+    if (!order.clueStartedAt && validation.allowed) {
       [order] = await db
         .update(teamClueOrder)
-        .set({ clueStartedAt: new Date() })
+        .set({ clueStartedAt: now })
         .where(eq(teamClueOrder.id, order.id))
         .returning();
     }

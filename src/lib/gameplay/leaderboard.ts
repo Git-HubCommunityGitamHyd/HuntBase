@@ -1,3 +1,5 @@
+import { calculateActiveElapsedTimeMs, PauseRecord } from "./hunt-lifecycle";
+
 export interface RawTeamProgress {
     id: string;
     team_name: string;
@@ -33,7 +35,7 @@ function formatDuration(totalSeconds: number): string {
  * 1. Disqualified teams always placed at bottom
  * 2. Score (Descending)
  * 3. Completion status (Completed teams outrank incomplete teams with identical scores)
- * 4. Completion speed (Duration in seconds from hunt start to finish, Ascending)
+ * 4. Active completion speed (Duration in seconds from hunt start to finish, EXCLUDING pause time, Ascending)
  * 5. Current step progression (Descending)
  * 6. Latest scan timestamp (Earlier check-in wins, Ascending)
  * 7. Alphabetical by team name (Ascending fallback)
@@ -41,7 +43,8 @@ function formatDuration(totalSeconds: number): string {
 export function computeLeaderboard(
     teams: RawTeamProgress[],
     totalClues: number,
-    huntStartedAt?: string | null
+    huntStartedAt?: string | null,
+    pauses: PauseRecord[] = []
 ): LeaderboardEntry[] {
     const startTimeMs = huntStartedAt ? new Date(huntStartedAt).getTime() : null;
 
@@ -53,7 +56,8 @@ export function computeLeaderboard(
         let durationSeconds: number | null = null;
         if (isComplete && team.hunt_finished_at && startTimeMs) {
             const finishTimeMs = new Date(team.hunt_finished_at).getTime();
-            durationSeconds = Math.max(0, Math.floor((finishTimeMs - startTimeMs) / 1000));
+            const activeMs = calculateActiveElapsedTimeMs(startTimeMs, finishTimeMs, pauses);
+            durationSeconds = Math.max(0, Math.floor(activeMs / 1000));
         }
 
         return {
@@ -80,7 +84,7 @@ export function computeLeaderboard(
             return a.isComplete ? -1 : 1;
         }
 
-        // 4. For completed teams: fastest duration wins
+        // 4. For completed teams: fastest active duration wins
         if (a.isComplete && b.isComplete && a.durationSeconds !== null && b.durationSeconds !== null) {
             if (a.durationSeconds !== b.durationSeconds) {
                 return a.durationSeconds - b.durationSeconds;

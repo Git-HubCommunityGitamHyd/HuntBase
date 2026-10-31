@@ -13,6 +13,7 @@ import {
 } from "@/db/schema";
 import { requireVerifiedPlayer } from "@/lib/auth/session";
 import { isUniqueViolation } from "@/lib/db-errors";
+import { validateHuntActiveState } from "@/lib/gameplay/hunt-lifecycle";
 
 // One message for "unknown code" and "real code, wrong clue", so codes can't be probed.
 const NOT_YOUR_CHECKPOINT =
@@ -26,11 +27,34 @@ const reply = (status: number, message: string, extra: Record<string, unknown> =
 
 export async function POST(request: NextRequest) {
   try {
-    // Team and player come from the session. Anything in the body about them is ignored.
+    // Critical Issue 1: Team and player come from the verified session.
     const auth = await requireVerifiedPlayer(request);
     if (auth instanceof NextResponse) return auth;
 
     const body = await request.json().catch(() => null);
+
+    // Reject forged / mismatched client-supplied identity fields
+    if (body) {
+      if (body.team_id && body.team_id !== auth.teamId) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+      }
+      if (body.teamId && body.teamId !== auth.teamId) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched team identity" }, { status: 403 });
+      }
+      if (body.player_id && body.player_id !== auth.id) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+      }
+      if (body.playerId && body.playerId !== auth.id) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched player identity" }, { status: 403 });
+      }
+      if (body.organization_id && body.organization_id !== auth.organizationId) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched organization identity" }, { status: 403 });
+      }
+      if (body.organizationId && body.organizationId !== auth.organizationId) {
+        return NextResponse.json({ success: false, message: "Forbidden: Mismatched organization identity" }, { status: 403 });
+      }
+    }
+
     const token = typeof body?.token === "string" ? body.token.trim() : "";
     if (!token || token.length > 100) {
       return NextResponse.json(
@@ -57,29 +81,20 @@ export async function POST(request: NextRequest) {
       if (!event) return reply(404, "Event not found");
 
       const now = new Date();
-      if (event.huntStatus === "paused") {
-        return reply(403, "The hunt is currently paused by organizers.");
-      }
-      if (!event.isActive || event.huntStatus !== "active" || !event.huntStartedAt) {
-        return reply(403, "The hunt is not currently active");
-      }
-      if (now < event.startTime) return reply(403, "The event hasn't started yet");
-      if (now > event.endTime) return reply(403, "The event has ended");
 
       // Time spent paused does not count against the hunt.
       const pauses = await tx
         .select({ pausedAt: eventPauses.pausedAt, resumedAt: eventPauses.resumedAt })
         .from(eventPauses)
         .where(
-          and(eq(eventPauses.eventId, event.id), gte(eventPauses.pausedAt, event.huntStartedAt))
+          and(eq(eventPauses.eventId, event.id), gte(eventPauses.pausedAt, event.huntStartedAt ?? new Date(0)))
         );
-      const pausedMs = pauses.reduce(
-        (sum, p) => sum + ((p.resumedAt ?? now).getTime() - p.pausedAt.getTime()),
-        0
-      );
-      const deadline =
-        event.huntStartedAt.getTime() + event.huntDurationMinutes * 60_000 + pausedMs;
-      if (now.getTime() > deadline) return reply(403, "Time's up! The hunt has ended.");
+
+      // Centralized lifecycle validation (checks active, paused, completed, and pause-adjusted duration)
+      const validation = validateHuntActiveState(event, pauses, now);
+      if (!validation.allowed) {
+        return reply(validation.status, validation.message);
+      }
 
       const [qr] = await tx
         .select()
@@ -99,77 +114,103 @@ export async function POST(request: NextRequest) {
         return {
           status: 200,
           body: {
-            success: false,
-            isFake: true,
-            message: "Decoy checkpoint! You scanned a decoy QR code!",
+            success: true,
+            is_fake: true,
             redirect_url: qr.redirectUrl,
-            fake_label: qr.fakeLabel,
+            message: "Decoy QR code scanned!",
           },
         };
       }
 
-      const [expected] = await tx
+      if (!qr.clueId) return reply(400, NOT_YOUR_CHECKPOINT);
+
+      // Fetch the clue this team is currently on.
+      const [order] = await tx
         .select()
         .from(teamClueOrder)
-        .where(and(eq(teamClueOrder.teamId, team.id), eq(teamClueOrder.stepIndex, team.currentStep)))
+        .where(
+          and(
+            eq(teamClueOrder.teamId, team.id),
+            eq(teamClueOrder.stepIndex, team.currentStep)
+          )
+        )
         .limit(1);
-      if (!expected) {
-        return reply(400, "All clues have already been completed for your team!");
-      }
-      if (qr.clueId !== expected.clueId) return reply(400, NOT_YOUR_CHECKPOINT);
+      if (!order) return reply(400, NOT_YOUR_CHECKPOINT);
 
+      // Scanned the wrong clue: don't reveal which one it was.
+      if (order.clueId !== qr.clueId) return reply(400, NOT_YOUR_CHECKPOINT);
+
+      const [clue] = await tx
+        .select({ id: clues.id })
+        .from(clues)
+        .where(eq(clues.id, order.clueId))
+        .limit(1);
+      if (!clue) return reply(404, "Clue not found");
+
+      // Points: standard 10 pts, deduct 5 pts penalty if hint was used. Floor at 0.
+      const basePoints = 10;
+      const hintPenalty = 5;
+      const rawPoints = basePoints - (order.hintViewed ? hintPenalty : 0);
+      const pointsAwarded = Math.max(0, rawPoints);
+
+      // Record the successful scan.
+      try {
+        await tx.insert(scans).values({
+          organizationId: team.organizationId,
+          eventId: team.eventId,
+          teamId: team.id,
+          clueId: clue.id,
+          qrCodeId: qr.id,
+          scannedBy: auth.id,
+          hintWasUsed: order.hintViewed,
+          pointsAwarded,
+        });
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          return reply(400, "Checkpoint already scanned");
+        }
+        throw err;
+      }
+
+      // Count total clues for this event
       const [{ totalClues }] = await tx
         .select({ totalClues: count() })
         .from(clues)
-        .where(eq(clues.eventId, team.eventId));
+        .where(eq(clues.eventId, event.id));
 
-      const points = expected.hintViewed ? 5 : 10;
       const nextStep = team.currentStep + 1;
-      const complete = nextStep >= totalClues;
-      const newScore = team.score + points;
+      const isComplete = nextStep >= totalClues;
 
-      await tx.insert(scans).values({
-        organizationId: team.organizationId,
-        eventId: team.eventId,
-        teamId: team.id,
-        clueId: expected.clueId,
-        qrCodeId: qr.id,
-        scannedBy: auth.id,
-        hintWasUsed: expected.hintViewed,
-        pointsAwarded: points,
-      });
       await tx
         .update(teams)
-        .set({ score: newScore, currentStep: nextStep, ...(complete && { huntFinishedAt: now }) })
+        .set({
+          score: team.score + pointsAwarded,
+          currentStep: nextStep,
+          huntFinishedAt: isComplete ? now : null,
+        })
         .where(eq(teams.id, team.id));
 
       return {
         status: 200,
         body: {
           success: true,
-          message: complete
-            ? "Victory! Your team has solved all clues and finished the hunt!"
-            : `Checkpoint verified! +${points} points${expected.hintViewed ? " (hint used)" : ""}. Move to the next clue!`,
-          pointsEarned: points,
-          newScore,
-          nextStep,
-          isComplete: complete,
-          hintUsed: expected.hintViewed,
+          points_awarded: pointsAwarded,
+          new_score: team.score + pointsAwarded,
+          is_complete: isComplete,
+          next_step: nextStep,
+          total_clues: totalClues,
+          message: isComplete
+            ? "Congratulations! You completed the hunt!"
+            : "Clue solved! Proceed to next clue.",
         },
       };
     });
 
     return NextResponse.json(result.body, { status: result.status });
   } catch (error) {
-    if (isUniqueViolation(error)) {
-      return NextResponse.json(
-        { success: false, message: "Your team has already verified this clue!" },
-        { status: 400 }
-      );
-    }
-    console.error("Scan route error:", error);
+    console.error("Scan processing error:", error);
     return NextResponse.json(
-      { success: false, message: "An unexpected error occurred" },
+      { success: false, message: "An error occurred while processing scan" },
       { status: 500 }
     );
   }

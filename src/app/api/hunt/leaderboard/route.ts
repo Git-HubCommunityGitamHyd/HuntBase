@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { events, teams, clues, scans } from "@/db/schema";
+import { events, teams, clues, scans, eventPauses } from "@/db/schema";
 import { eq, count, max } from "drizzle-orm";
 import { computeLeaderboard, RawTeamProgress } from "@/lib/gameplay/leaderboard";
 
@@ -72,7 +72,16 @@ export async function GET(request: NextRequest) {
             .from(teams)
             .where(eq(teams.eventId, eventId));
 
-        // Additional Issue 6: Aggregate the latest scan timestamp per team in SQL using MAX() and GROUP BY
+        // 4. Fetch pause intervals to exclude paused time from completion durations
+        const eventPauseRows = await db
+            .select({
+                pausedAt: eventPauses.pausedAt,
+                resumedAt: eventPauses.resumedAt,
+            })
+            .from(eventPauses)
+            .where(eq(eventPauses.eventId, eventId));
+
+        // 5. Aggregate the latest scan timestamp per team in SQL using MAX() and GROUP BY
         const latestScans = await db
             .select({
                 teamId: scans.teamId,
@@ -89,7 +98,7 @@ export async function GET(request: NextRequest) {
             }
         }
 
-        // 4. Build raw team records for ranking
+        // 6. Build raw team records for ranking
         const rawTeams: RawTeamProgress[] = competingTeams.map((t) => ({
             id: t.id,
             team_name: t.teamName,
@@ -100,11 +109,12 @@ export async function GET(request: NextRequest) {
             last_scan_at: latestScanMap.get(t.id) || null,
         }));
 
-        // 5. Compute sorted rankings with deterministic tie-breakers
+        // 7. Compute sorted rankings with deterministic tie-breakers (active elapsed time excluding pause)
         const leaderboard = computeLeaderboard(
             rawTeams,
             totalClues ?? 0,
-            event.huntStartedAt ? event.huntStartedAt.toISOString() : null
+            event.huntStartedAt ? event.huntStartedAt.toISOString() : null,
+            eventPauseRows
         );
 
         const responsePayload = {

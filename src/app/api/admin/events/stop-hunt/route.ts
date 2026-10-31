@@ -40,7 +40,21 @@ export async function POST(request: NextRequest) {
                 };
             }
 
-            // High-priority Issue 1: Only allow stopping from active or paused states
+            // High-priority Issue 5: Idempotency check if already completed
+            if (event.huntStatus === "completed") {
+                return {
+                    status: 200,
+                    data: {
+                        success: true,
+                        message: "Hunt is already completed.",
+                        event_id,
+                        hunt_started_at: event.huntStartedAt?.toISOString() ?? null,
+                        hunt_ended_at: event.huntEndedAt?.toISOString() ?? null,
+                    },
+                };
+            }
+
+            // High-priority Issue 1 & 5: Only allow stopping from active or paused states
             if (event.huntStatus !== "active" && event.huntStatus !== "paused") {
                 return {
                     status: 400,
@@ -59,7 +73,7 @@ export async function POST(request: NextRequest) {
                 .set({ resumedAt: now })
                 .where(and(eq(eventPauses.eventId, event_id), isNull(eventPauses.resumedAt)));
 
-            // Mark hunt as completed with hunt_ended_at
+            // High-priority Issue 5: Mark hunt as completed with hunt_ended_at; NEVER CLEAR hunt_started_at
             await tx
                 .update(events)
                 .set({
@@ -74,6 +88,9 @@ export async function POST(request: NextRequest) {
                 data: {
                     success: true,
                     message: "Hunt concluded successfully. Scores and final leaderboard are frozen.",
+                    event_id,
+                    hunt_started_at: event.huntStartedAt?.toISOString() ?? null,
+                    hunt_ended_at: now.toISOString(),
                 },
             };
         });

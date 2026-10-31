@@ -40,6 +40,17 @@ export async function POST(request: NextRequest) {
                 };
             }
 
+            // High-priority Issue 4: Do not reopen a completed/stopped hunt through pause/resume
+            if (event.huntStatus === "completed") {
+                return {
+                    status: 400,
+                    data: {
+                        success: false,
+                        message: "Cannot pause or resume a completed hunt. Concluded events cannot be reopened.",
+                    },
+                };
+            }
+
             if (event.huntStatus !== "active" && event.huntStatus !== "paused") {
                 return {
                     status: 400,
@@ -57,6 +68,19 @@ export async function POST(request: NextRequest) {
                 newStatus = "active";
             } else {
                 newStatus = event.huntStatus === "paused" ? "active" : "paused";
+            }
+
+            // Idempotent handling if already in desired status
+            if (newStatus === event.huntStatus) {
+                return {
+                    status: 200,
+                    data: {
+                        success: true,
+                        message: `Hunt is already ${newStatus}.`,
+                        event_id,
+                        status: newStatus,
+                    },
+                };
             }
 
             const now = new Date();
@@ -83,7 +107,7 @@ export async function POST(request: NextRequest) {
                     .where(and(eq(eventPauses.eventId, event_id), isNull(eventPauses.resumedAt)));
             }
 
-            // Update event status
+            // Update event status atomically
             await tx
                 .update(events)
                 .set({ huntStatus: newStatus })
@@ -98,16 +122,17 @@ export async function POST(request: NextRequest) {
                 data: {
                     success: true,
                     message,
-                    hunt_status: newStatus,
+                    event_id,
+                    status: newStatus,
                 },
             };
         });
 
         return NextResponse.json(result.data, { status: result.status });
     } catch (error) {
-        console.error("Pause hunt error:", error);
+        console.error("Pause/resume hunt error:", error);
         return NextResponse.json(
-            { success: false, message: "Failed to update hunt pause state" },
+            { success: false, message: "Failed to update hunt state" },
             { status: 500 }
         );
     }
