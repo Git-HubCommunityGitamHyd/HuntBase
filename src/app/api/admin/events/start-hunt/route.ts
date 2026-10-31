@@ -1,176 +1,36 @@
+import { asc, eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/server";
+import { db } from "@/db";
+import { clues, events, teamClueOrder, teams } from "@/db/schema";
 
-// Fisher-Yates shuffle algorithm
-function shuffleArray<T>(array: T[]): T[] {
-    const shuffled = [...array];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled;
-}
+function shuffle<T>(items: T[]) { const a = [...items]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
 
-// POST - Start the hunt for an event
 export async function POST(request: NextRequest) {
-    try {
-        const body = await request.json();
-        const { event_id } = body;
-
-        if (!event_id) {
-            return NextResponse.json(
-                { success: false, message: "Event ID is required" },
-                { status: 400 }
-            );
-        }
-
-        const supabase = createAdminClient();
-
-        // Get the event
-        const { data: event, error: eventError } = await supabase
-            .from("events")
-            .select("*")
-            .eq("id", event_id)
-            .single();
-
-        if (eventError || !event) {
-            return NextResponse.json(
-                { success: false, message: "Event not found" },
-                { status: 404 }
-            );
-        }
-
-        if (!event.is_active) {
-            return NextResponse.json(
-                { success: false, message: "Event must be active to start the hunt" },
-                { status: 400 }
-            );
-        }
-
-        // Get all teams for this event (non-admin only), ordered for consistent round-robin
-        const { data: teams, error: teamsError } = await supabase
-            .from("teams")
-            .select("id, team_name")
-            .eq("event_id", event_id)
-            .eq("is_admin", false)
-            .order("created_at", { ascending: true });
-
-        if (teamsError) {
-            return NextResponse.json(
-                { success: false, message: teamsError.message },
-                { status: 500 }
-            );
-        }
-
-        // Get all clues for this event
-        const { data: clues, error: cluesError } = await supabase
-            .from("clues")
-            .select("id")
-            .eq("event_id", event_id)
-            .order("step_number", { ascending: true });
-
-        if (cluesError) {
-            return NextResponse.json(
-                { success: false, message: cluesError.message },
-                { status: 500 }
-            );
-        }
-
-        if (!clues || clues.length === 0) {
-            return NextResponse.json(
-                { success: false, message: "No clues found for this event. Add clues first!" },
-                { status: 400 }
-            );
-        }
-
-        // Clear any existing team_clue_order for these teams (in case of restart)
-        if (teams && teams.length > 0) {
-            const teamIds = teams.map(t => t.id);
-            await supabase
-                .from("team_clue_order")
-                .delete()
-                .in("team_id", teamIds);
-
-            // Generate clue order with ROUND-ROBIN starting points
-            // Each team starts with a different clue to prevent crowding
-            const clueOrders: { team_id: string; clue_id: string; step_index: number }[] = [];
-
-            console.log(`Generating clue order for ${teams.length} teams with ${clues.length} clues`);
-
-            for (let teamIndex = 0; teamIndex < teams.length; teamIndex++) {
-                const team = teams[teamIndex];
-
-                // Calculate starting offset for this team (round-robin)
-                const startOffset = teamIndex % clues.length;
-
-                console.log(`Team ${teamIndex + 1} "${team.team_name}": starting with clue offset ${startOffset}`);
-
-                // Create rotated clue order: start from different clue, then random
-                const rotatedClues = [
-                    ...clues.slice(startOffset),
-                    ...clues.slice(0, startOffset)
-                ];
-
-                // Shuffle everything EXCEPT the first clue (keep round-robin first clue)
-                const firstClue = rotatedClues[0];
-                const remainingClues = shuffleArray(rotatedClues.slice(1));
-                const finalOrder = [firstClue, ...remainingClues];
-
-                console.log(`  First clue ID: ${firstClue.id}`);
-
-                finalOrder.forEach((clue, index) => {
-                    clueOrders.push({
-                        team_id: team.id,
-                        clue_id: clue.id,
-                        step_index: index,
-                    });
-                });
-            }
-
-            // Insert all clue orders
-            if (clueOrders.length > 0) {
-                const { error: insertError } = await supabase
-                    .from("team_clue_order")
-                    .insert(clueOrders);
-
-                if (insertError) {
-                    console.error("Failed to create team clue orders:", insertError);
-                    return NextResponse.json(
-                        { success: false, message: "Failed to generate clue orders: " + insertError.message },
-                        { status: 500 }
-                    );
-                }
-            }
-
-            // Reset all teams to step 0 and score 0
-            await supabase
-                .from("teams")
-                .update({ current_step: 0, score: 0, hunt_finished_at: null })
-                .in("id", teamIds);
-        }
-
-        // Set hunt_started_at to now
-        const { error: updateError } = await supabase
-            .from("events")
-            .update({ hunt_started_at: new Date().toISOString() })
-            .eq("id", event_id);
-
-        if (updateError) {
-            return NextResponse.json(
-                { success: false, message: updateError.message },
-                { status: 500 }
-            );
-        }
-
-        return NextResponse.json({
-            success: true,
-            message: `Hunt started! ${teams?.length || 0} teams are ready with ${clues.length} clues each.`,
-        });
-    } catch (error) {
-        console.error("Start hunt error:", error);
-        return NextResponse.json(
-            { success: false, message: "Failed to start hunt" },
-            { status: 500 }
-        );
-    }
+  try {
+    const { event_id } = await request.json();
+    if (!event_id) return NextResponse.json({ success: false, message: "Event ID is required" }, { status: 400 });
+    const result = await db.transaction(async (tx) => {
+      const [event] = await tx.select().from(events).where(eq(events.id, event_id)).limit(1);
+      if (!event) return { error: "Event not found", status: 404 };
+      if (!event.isActive) return { error: "Event must be active to start the hunt", status: 400 };
+      const clueRows = await tx.select({ id: clues.id }).from(clues).where(eq(clues.eventId, event_id)).orderBy(asc(clues.stepNumber));
+      if (!clueRows.length) return { error: "No clues found for this event. Add clues first!", status: 400 };
+      const teamRows = await tx.select({ id: teams.id }).from(teams).where(eq(teams.eventId, event_id)).orderBy(asc(teams.createdAt));
+      for (let i = 0; i < teamRows.length; i++) {
+        const offset = i % clueRows.length;
+        const rotated = [...clueRows.slice(offset), ...clueRows.slice(0, offset)];
+        const order = [rotated[0], ...shuffle(rotated.slice(1))];
+        await tx.delete(teamClueOrder).where(eq(teamClueOrder.teamId, teamRows[i].id));
+        await tx.insert(teamClueOrder).values(order.map((c, stepIndex) => ({ teamId: teamRows[i].id, clueId: c.id, stepIndex })));
+      }
+      if (teamRows.length) await tx.update(teams).set({ currentStep: 0, score: 0, huntFinishedAt: null }).where(eq(teams.eventId, event_id));
+      await tx.update(events).set({ huntStartedAt: new Date(), huntStatus: "active" }).where(eq(events.id, event_id));
+      return { teamCount: teamRows.length, clueCount: clueRows.length };
+    });
+    if ("error" in result) return NextResponse.json({ success: false, message: result.error }, { status: result.status });
+    return NextResponse.json({ success: true, message: `Hunt started! ${result.teamCount} teams are ready with ${result.clueCount} clues each.` });
+  } catch (error) {
+    console.error("Start hunt error:", error);
+    return NextResponse.json({ success: false, message: "Failed to start hunt" }, { status: 500 });
+  }
 }
