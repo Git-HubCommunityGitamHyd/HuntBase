@@ -10,9 +10,12 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
+const finalConnectionString =
+  connectionString || "postgresql://postgres:postgres@localhost:5432/huntbase";
+
 const pool =
   globalForDb.pgPool ??
-  new Pool({ connectionString: process.env.DATABASE_URL, max: 5 });
+  new Pool({ connectionString: finalConnectionString, max: 5 });
 
 // Reuse the pool during dev hot-reloads so connections don't pile up.
 if (process.env.NODE_ENV !== "production") globalForDb.pgPool = pool;

@@ -2,19 +2,32 @@ import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { organizationAssets, organizations, themeConfigs } from "@/db/schema";
+import { requireAdmin } from "@/lib/auth/session";
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 const ALLOWED_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/svg+xml"]);
 
 export async function POST(request: NextRequest) {
   try {
+    const auth = await requireAdmin(request);
+    if (auth instanceof NextResponse) return auth;
+
     const formData = await request.formData();
     const file = formData.get("file");
     const organizationId = formData.get("organization_id");
     const assetType = formData.get("asset_type") || "logo";
+
     if (!(file instanceof File) || typeof organizationId !== "string") {
       return NextResponse.json({ success: false, message: "File and organization_id are required" }, { status: 400 });
     }
+
+    if (auth.role !== "super_admin" && auth.organizationId !== organizationId) {
+      return NextResponse.json(
+        { success: false, message: "Forbidden: You do not have permission to upload assets for this organization" },
+        { status: 403 }
+      );
+    }
+
     if (file.size > MAX_FILE_SIZE) return NextResponse.json({ success: false, message: "File size exceeds 5MB limit" }, { status: 400 });
     if (!ALLOWED_TYPES.has(file.type)) return NextResponse.json({ success: false, message: "Invalid image format. Allowed: PNG, JPEG, WebP, SVG." }, { status: 400 });
     if (assetType !== "logo" && assetType !== "banner") return NextResponse.json({ success: false, message: "asset_type must be logo or banner" }, { status: 400 });
