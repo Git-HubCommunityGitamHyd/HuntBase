@@ -40,10 +40,14 @@ export async function POST(request: NextRequest) {
                 };
             }
 
-            if (event.huntStatus === "completed") {
+            // High-priority Issue 1: Only allow stopping from active or paused states
+            if (event.huntStatus !== "active" && event.huntStatus !== "paused") {
                 return {
                     status: 400,
-                    data: { success: false, message: "Hunt is already completed" },
+                    data: {
+                        success: false,
+                        message: `Cannot stop hunt: event status is currently '${event.huntStatus}'. Only 'active' or 'paused' hunts can be stopped.`,
+                    },
                 };
             }
 

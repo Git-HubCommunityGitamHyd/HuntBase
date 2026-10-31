@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -34,38 +34,72 @@ export default function MonitorPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [timeRemaining, setTimeRemaining] = useState<number | null>(null);
     const [fakeQRScans, setFakeQRScans] = useState<FakeQRScanWithDetails[]>([]);
+    const [mutatingTeamId, setMutatingTeamId] = useState<string | null>(null);
+    const [isEndingEvent, setIsEndingEvent] = useState(false);
+
+    // Track request sequence to discard stale out-of-order poll responses (Issue 10)
+    const pollSequenceRef = useRef(0);
 
     const fetchTeams = useCallback(async () => {
         if (!selectedEvent) return;
-        const response = await fetch(`/api/admin/monitor?event_id=${encodeURIComponent(selectedEvent)}`, { cache: "no-store" });
-        const data = await response.json();
-        if (!data.success) return;
-        setTeams(data.teams);
-        setClues(data.clues);
-        setTotalClues(data.totalClues);
-        setFakeQRScans(data.fakeScans);
+        const currentReqId = ++pollSequenceRef.current;
+
+        try {
+            const response = await fetch(`/api/admin/monitor?event_id=${encodeURIComponent(selectedEvent)}`, { cache: "no-store" });
+            if (!response.ok) {
+                throw new Error(`HTTP error ${response.status}`);
+            }
+            const data = await response.json();
+
+            // Discard stale response if a newer poll request has already begun
+            if (currentReqId !== pollSequenceRef.current) return;
+
+            if (data.success) {
+                setTeams(data.teams || []);
+                setClues(data.clues || []);
+                setTotalClues(data.totalClues || 0);
+                setFakeQRScans(data.fakeScans || []);
+            }
+        } catch (error) {
+            console.error("Monitor polling error:", error);
+        } finally {
+            if (currentReqId === pollSequenceRef.current) {
+                setIsLoading(false);
+            }
+        }
     }, [selectedEvent]);
 
     const fetchEvents = useCallback(async () => {
-        const response = await fetch("/api/admin/events", { cache: "no-store" });
-        const result = await response.json();
-        const data = result.success ? result.data as Event[] : [];
-        setEvents(data || []);
+        try {
+            const response = await fetch("/api/admin/events", { cache: "no-store" });
+            if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+            const result = await response.json();
+            const data = result.success ? (result.data as Event[]) : [];
+            setEvents(data || []);
 
-        setSelectedEvent((current) => current && data.some((event) => event.id === current)
-            ? current
-            : data.find((event) => event.is_active)?.id || data[0]?.id || "");
-        setIsLoading(false);
+            setSelectedEvent((current) =>
+                current && data.some((event) => event.id === current)
+                    ? current
+                    : data.find((event) => event.is_active)?.id || data[0]?.id || ""
+            );
+        } catch (error) {
+            console.error("Failed to fetch events:", error);
+        } finally {
+            setIsLoading(false);
+        }
     }, []);
 
     useEffect(() => {
         fetchEvents();
-    }, []);
+    }, [fetchEvents]);
 
     useEffect(() => {
         if (selectedEvent) {
             void fetchTeams();
-            const interval = setInterval(() => { void fetchTeams(); void fetchEvents(); }, 5000);
+            const interval = setInterval(() => {
+                void fetchTeams();
+                void fetchEvents();
+            }, 5000);
             return () => clearInterval(interval);
         }
     }, [selectedEvent, fetchTeams, fetchEvents]);
@@ -96,14 +130,33 @@ export default function MonitorPage() {
     }, [events, selectedEvent]);
 
     const toggleDisqualify = async (team: Team) => {
-        await fetch("/api/admin/teams", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: team.id, is_disqualified: !team.is_disqualified }) });
-        fetchTeams();
+        setMutatingTeamId(team.id);
+        try {
+            const response = await fetch("/api/admin/teams", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: team.id, is_disqualified: !team.is_disqualified }),
+            });
+            if (!response.ok) throw new Error("Server error toggling disqualification");
+            const data = await response.json();
+            if (data.success) {
+                await fetchTeams();
+            } else {
+                alert(data.message || "Failed to update team status");
+            }
+        } catch (error) {
+            console.error("Disqualify error:", error);
+            alert("Network error: Failed to update team status");
+        } finally {
+            setMutatingTeamId(null);
+        }
     };
 
     const adjustScore = async (teamId: string, adjustment: number) => {
         const team = teams.find((t) => t.id === teamId);
         if (!team) return;
 
+        setMutatingTeamId(teamId);
         try {
             const response = await fetch("/api/admin/teams/score", {
                 method: "POST",
@@ -114,24 +167,45 @@ export default function MonitorPage() {
                 }),
             });
 
+            if (!response.ok) throw new Error("Server error adjusting score");
             const data = await response.json();
-            if (!data.success) {
+            if (data.success) {
+                await fetchTeams();
+            } else {
                 console.error("Failed to adjust score:", data.message);
                 alert(data.message || "Failed to adjust score");
             }
-            // Refresh teams data
-            fetchTeams();
         } catch (error) {
             console.error("Error adjusting score:", error);
-            alert("Failed to adjust score");
+            alert("Network error: Failed to adjust score");
+        } finally {
+            setMutatingTeamId(null);
         }
     };
 
     const endEvent = async () => {
         if (!confirm("Are you sure you want to end this event? This will deactivate it.")) return;
 
-        await fetch("/api/admin/events", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: selectedEvent, is_active: false }) });
-        fetchEvents();
+        setIsEndingEvent(true);
+        try {
+            const response = await fetch("/api/admin/events", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ id: selectedEvent, is_active: false }),
+            });
+            if (!response.ok) throw new Error("Server error ending event");
+            const data = await response.json();
+            if (data.success) {
+                await fetchEvents();
+            } else {
+                alert(data.message || "Failed to end event");
+            }
+        } catch (error) {
+            console.error("Error ending event:", error);
+            alert("Network error: Failed to end event");
+        } finally {
+            setIsEndingEvent(false);
+        }
     };
 
     const formatTimeRemaining = (ms: number) => {
@@ -163,8 +237,8 @@ export default function MonitorPage() {
                 </div>
 
                 {activeEvent?.is_active && (
-                    <Button variant="destructive" onClick={endEvent}>
-                        End Event
+                    <Button variant="destructive" onClick={endEvent} disabled={isEndingEvent}>
+                        {isEndingEvent ? "Ending..." : "End Event"}
                     </Button>
                 )}
             </div>
@@ -359,6 +433,7 @@ export default function MonitorPage() {
                                                     <Button
                                                         size="sm"
                                                         variant="ghost"
+                                                        disabled={mutatingTeamId === team.id}
                                                         onClick={() => adjustScore(team.id, -5)}
                                                         className="h-6 w-6 p-0 text-red-400 hover:text-red-300"
                                                     >
@@ -368,6 +443,7 @@ export default function MonitorPage() {
                                                     <Button
                                                         size="sm"
                                                         variant="ghost"
+                                                        disabled={mutatingTeamId === team.id}
                                                         onClick={() => adjustScore(team.id, 5)}
                                                         className="h-6 w-6 p-0 text-green-400 hover:text-green-300"
                                                     >
@@ -409,6 +485,7 @@ export default function MonitorPage() {
                                             <td className="py-3 text-right">
                                                 <Button
                                                     size="sm"
+                                                    disabled={mutatingTeamId === team.id}
                                                     variant={team.is_disqualified ? "default" : "destructive"}
                                                     onClick={() => toggleDisqualify(team)}
                                                     className="text-xs"

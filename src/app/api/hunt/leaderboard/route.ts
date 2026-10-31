@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, teams, clues, scans } from "@/db/schema";
-import { eq, count, desc } from "drizzle-orm";
+import { eq, count, max } from "drizzle-orm";
 import { computeLeaderboard, RawTeamProgress } from "@/lib/gameplay/leaderboard";
 
 interface CacheEntry {
@@ -53,13 +53,13 @@ export async function GET(request: NextRequest) {
             );
         }
 
-        // 2. Count total clues for this event (Fails explicitly if DB has error)
+        // 2. Count total clues for this event
         const [{ totalClues }] = await db
             .select({ totalClues: count() })
             .from(clues)
             .where(eq(clues.eventId, eventId));
 
-        // 3. Fetch competing teams (teams.isAdmin no longer exists)
+        // 3. Fetch competing teams
         const competingTeams = await db
             .select({
                 id: teams.id,
@@ -72,24 +72,24 @@ export async function GET(request: NextRequest) {
             .from(teams)
             .where(eq(teams.eventId, eventId));
 
-        // 4. Batch query latest scans to prevent N+1 query overhead
-        const eventScans = await db
+        // Additional Issue 6: Aggregate the latest scan timestamp per team in SQL using MAX() and GROUP BY
+        const latestScans = await db
             .select({
                 teamId: scans.teamId,
-                scannedAt: scans.scannedAt,
+                latestScanAt: max(scans.scannedAt),
             })
             .from(scans)
             .where(eq(scans.eventId, eventId))
-            .orderBy(desc(scans.scannedAt));
+            .groupBy(scans.teamId);
 
         const latestScanMap = new Map<string, string>();
-        for (const scan of eventScans) {
-            if (!latestScanMap.has(scan.teamId)) {
-                latestScanMap.set(scan.teamId, scan.scannedAt.toISOString());
+        for (const s of latestScans) {
+            if (s.teamId && s.latestScanAt) {
+                latestScanMap.set(s.teamId, new Date(s.latestScanAt).toISOString());
             }
         }
 
-        // 5. Build raw team records for ranking
+        // 4. Build raw team records for ranking
         const rawTeams: RawTeamProgress[] = competingTeams.map((t) => ({
             id: t.id,
             team_name: t.teamName,
@@ -100,7 +100,7 @@ export async function GET(request: NextRequest) {
             last_scan_at: latestScanMap.get(t.id) || null,
         }));
 
-        // 6. Compute sorted rankings with deterministic tie-breakers
+        // 5. Compute sorted rankings with deterministic tie-breakers
         const leaderboard = computeLeaderboard(
             rawTeams,
             totalClues ?? 0,
