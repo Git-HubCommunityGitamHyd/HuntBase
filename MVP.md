@@ -13,10 +13,10 @@ HuntBase is a white-label, multi-tenant campus treasure hunt platform built by G
 | **Frontend** | Next.js 16 (App Router), React 19, TypeScript | Server Components, dynamic routes, fast hydration |
 | **Styling** | Tailwind CSS v4, shadcn/ui | CSS variable theme tokens, dark/light mode responsive |
 | **Backend** | Next.js API Routes, HttpOnly Cookies | Secure session middleware, administrative endpoints |
-| **Database** | Supabase (PostgreSQL 15+) | 12 tables, Row Level Security (RLS), ACID constraints |
+| **Database** | Neon PostgreSQL with Drizzle ORM | PostgreSQL transactions and schema-managed migrations |
 | **Auth** | Multi-Tier Cookie & Token Auth | Club host credentials + individual team passwords |
-| **Realtime** | Supabase Realtime (WebSockets) | Live monitoring with `REPLICA IDENTITY FULL` |
-| **Storage** | Supabase Storage (`organization-assets`) | Club logos, custom banners (5MB limit, CDN delivery) |
+| **Live Updates** | Polling API endpoints | Hunt and admin dashboards refresh every five seconds |
+| **Storage** | Neon PostgreSQL (`bytea`) | Club logos and banners (5MB limit) |
 | **QR Engine** | html5-qrcode & server qrcode | Native mobile camera scanner + server PNG/SVG batch generation |
 
 ---
@@ -55,11 +55,11 @@ HuntBase Platform
 │   ├── /admin/theme               (Theme customizer & logo uploader)
 │   └── /admin/monitor             (Real-time live team board & map)
 │
-└── Supabase Backend
-    ├── Master Schema              (supabase/schema.sql - 12 public tables)
-    ├── Row Level Security (RLS)   (Direct anon SELECT blocked on secret tables)
-    ├── Realtime Engine            (teams, events, scans, fake_qr_scans)
-    └── Storage Bucket             (organization-assets with 5MB upload limit)
+└── Neon Backend
+    ├── Drizzle Schema              (src/db/schema)
+    ├── SQL Migrations              (migrations/)
+    ├── Session and API guards      (HttpOnly cookies)
+    └── Organization Assets         (PostgreSQL bytea, 5MB upload limit)
 ```
 
 ---

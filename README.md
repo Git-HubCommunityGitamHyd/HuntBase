@@ -11,7 +11,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 - ⏱️ **Synchronized Hunt Timer** - Admin-controlled live countdown
 - 💡 **Timed Hint System** - Time-delayed hints with score penalty balance
 - 🎭 **Rickroll Decoy QR Codes** - "Hall of Shame" tracking for decoy scans
-- 📊 **Sub-300ms Live Monitoring** - Real-time WebSocket admin dashboard
+- 📊 **Live Monitoring** - Admin dashboard refreshes from the database every five seconds
 - 📱 **Mobile-First Scanner** - Zero-latency camera scanning with Safari/Android lifecycle protection
 
 ## 🛠️ Tech Stack
@@ -20,7 +20,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 |---|---|
 | **Framework** | Next.js 16 (App Router) |
 | **Language** | TypeScript |
-| **Database** | Supabase (PostgreSQL with RLS) |
+| **Database** | Neon (PostgreSQL) with Drizzle ORM |
 | **Styling** | Tailwind CSS v4 & shadcn/ui |
 | **QR Scanning** | html5-qrcode (optimized lifecycle) |
 | **QR Generation** | qrcode (server-side SVG/PNG) |
@@ -32,7 +32,7 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
 
 - Node.js 20+
 - npm
-- Supabase account
+- Neon account
 
 ### Installation
 
@@ -47,19 +47,19 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
    npm install
    ```
 
-3. **Set up Supabase**
-   - Create a project on [Supabase](https://supabase.com).
-   - Run the master schema in `supabase/schema.sql` via the Supabase SQL Editor or:
-     ```bash
-     node scripts/migrate.js
-     ```
-   - Add environment variables to `.env.local`:
+3. **Set up Neon**
+   - Create a PostgreSQL database on [Neon](https://neon.tech).
+   - Add the pooled and direct connection URLs to `.env.local`:
      ```env
-     NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-     NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-     SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+     DATABASE_URL=your_pooled_neon_connection_string
+     DATABASE_URL_DIRECT=your_direct_neon_connection_string
+     SEED_ADMIN_USERNAME=admin
+     SEED_ADMIN_EMAIL=admin@example.com
+     SEED_ADMIN_PASSWORD=a_long_unique_password
+     OTP_SECRET=your_random_secret
      NEXT_PUBLIC_APP_URL=http://localhost:3000
      ```
+   - Run `npm run db:migrate` and `npm run db:seed`.
 
 4. **Run the development server**
    ```bash
@@ -85,9 +85,9 @@ src/
 ├── contexts/            # React contexts (AuthContext, ThemeContext)
 ├── lib/
 │   ├── auth/            # Session token verification
-│   ├── supabase/        # Supabase client / admin client
+│   ├── db/              # Neon PostgreSQL schema and Drizzle connection
 │   └── types.ts         # TypeScript data contracts
-└── middleware.ts        # Route protection & HttpOnly cookie guards
+└── proxy.ts             # Route protection & HttpOnly cookie guards
 ```
 
 ## 🎮 How It Works
