@@ -1,4 +1,4 @@
-// Database types for Supabase tables
+// Shared database row interfaces
 
 export type ThemePreset = 
   | 'cyber-matrix'
@@ -220,7 +220,7 @@ export interface GeneratedTeamCredential {
   password: string;
 }
 
-// Database types for Supabase client
+// Legacy table contracts; application queries use the Drizzle schema.
 export type Database = {
   public: {
     Tables: {
