@@ -1,9 +1,8 @@
 import { eq } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { teamMembers, teams } from "@/db/schema";
+import { teamMembers } from "@/db/schema";
 import { hashPassword } from "@/lib/auth/password";
-import { requireAdmin } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
   try {

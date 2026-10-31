@@ -17,15 +17,18 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Techscapades 4.0 Platform",
-  description: "A tech-themed treasure hunt experience. Part of EPOCH 4.0 by GitHub Community GITAM",
+  title: {
+    default: "HuntBase",
+    template: "%s | HuntBase",
+  },
+  description: "The multi-tenant campus treasure hunt platform. Solve clues, scan QR codes, and race in real-time!",
   icons: {
     icon: "/favicon.svg",
   },
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Techscapades",
+    title: "HuntBase",
   },
 };
 

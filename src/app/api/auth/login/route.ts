@@ -1,9 +1,9 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { events, teamMembers, teams } from "@/db/schema";
 import { createSession, setSessionCookie } from "@/lib/auth/session";
-import { verifyPassword } from "@/lib/utils/helpers";
+import { verifyPasswordAndUpgrade } from "@/lib/auth/password";
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,14 +43,25 @@ export async function POST(request: NextRequest) {
       .from(teamMembers)
       .innerJoin(teams, eq(teams.id, teamMembers.teamId))
       .innerJoin(events, eq(events.id, teams.eventId))
-      .where(eq(teamMembers.username, username))
+      .where(eq(sql`lower(${teamMembers.username})`, username))
       .limit(1);
 
-    if (!record || !(await verifyPassword(password, record.passwordHash))) {
+    if (!record) {
       return NextResponse.json(
         { success: false, message: "Invalid username or password" },
         { status: 401 }
       );
+    }
+
+    const passwordCheck = await verifyPasswordAndUpgrade(password, record.passwordHash);
+    if (!passwordCheck.valid) {
+      return NextResponse.json(
+        { success: false, message: "Invalid username or password" },
+        { status: 401 }
+      );
+    }
+    if (passwordCheck.upgradedHash) {
+      await db.update(teamMembers).set({ passwordHash: passwordCheck.upgradedHash }).where(eq(teamMembers.id, record.id));
     }
 
     if (record.isDisqualified) {

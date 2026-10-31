@@ -56,9 +56,13 @@ A multi-tenant, white-label campus treasure hunt platform built by GitHub Commun
      SEED_ADMIN_USERNAME=admin
      SEED_ADMIN_EMAIL=admin@example.com
      SEED_ADMIN_PASSWORD=a_long_unique_password
-     OTP_SECRET=your_random_secret
+     OTP_SECRET=at_least_32_random_characters
+     GITAM_EMAIL_DOMAIN=student.gitam.edu
+     RESEND_API_KEY=your_resend_api_key
+     EMAIL_FROM=HuntBase <noreply@your-verified-domain.example>
      NEXT_PUBLIC_APP_URL=http://localhost:3000
      ```
+   - In development, if `RESEND_API_KEY` is unset, the verification code is printed to the server terminal. Production requires a configured email provider.
    - Run `npm run db:migrate` and `npm run db:seed`.
 
 4. **Run the development server**
@@ -85,15 +89,15 @@ src/
 ├── contexts/            # React contexts (AuthContext, ThemeContext)
 ├── lib/
 │   ├── auth/            # Session token verification
-│   ├── db/              # Neon PostgreSQL schema and Drizzle connection
 │   └── types.ts         # TypeScript data contracts
+├── db/                  # Neon PostgreSQL schema and Drizzle connection
 └── proxy.ts             # Route protection & HttpOnly cookie guards
 ```
 
 ## 🎮 How It Works
 
 ### Player Flow
-1. Player logs in with their team credentials.
+1. A player registers with individual credentials for an open team, then logs in with that username and password. Username matching is case-insensitive.
 2. Views their current clue (riddle).
 3. Solves the riddle and navigates to the physical location.
 4. Scans the checkpoint QR code.

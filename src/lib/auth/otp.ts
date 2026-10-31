@@ -19,7 +19,7 @@ export function normalizeGitamEmail(input: unknown): string | null {
   const local = email.slice(0, at);
   const domain = email.slice(at + 1);
   if (domain !== allowedDomain()) return null; // exact match, not "ends with"
-  if (!/^[a-z0-9._%+-]+$/.test(local)) return null;
+  if (local.length > 64 || !/^[a-z0-9_%+-]+(?:\.[a-z0-9_%+-]+)*$/.test(local)) return null;
   return email;
 }
 

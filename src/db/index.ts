@@ -4,11 +4,9 @@ import * as schema from "./schema";
 
 const globalForDb = globalThis as unknown as { pgPool?: Pool };
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString && process.env.NODE_ENV === "production") {
+if (!process.env.DATABASE_URL) {
   throw new Error(
-    "DATABASE_URL environment variable is required in production. Refusing to silently connect to default/fallback database."
+    "DATABASE_URL is required to connect to PostgreSQL. Configure it in the environment; no localhost fallback is used."
   );
 }
 

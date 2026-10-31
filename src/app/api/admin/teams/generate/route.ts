@@ -4,7 +4,6 @@ import { db } from "@/db";
 import { clues, events, teamClueOrder, teamMembers, teams } from "@/db/schema";
 import { generatePassword, generateUsername, shuffleArray } from "@/lib/utils/helpers";
 import { hashPassword } from "@/lib/auth/password";
-import { requireAdmin } from "@/lib/auth/session";
 
 export async function POST(request: NextRequest) {
   try {

@@ -1,9 +1,9 @@
-import { eq, or } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { hostUsers, organizations } from "@/db/schema";
 import { createSession, setSessionCookie } from "@/lib/auth/session";
-import { verifyPassword } from "@/lib/auth/password";
+import { verifyPasswordAndUpgrade } from "@/lib/auth/password";
 
 export async function POST(request: NextRequest) {
   try {
@@ -21,10 +21,18 @@ export async function POST(request: NextRequest) {
     const [hostUser] = await db
       .select()
       .from(hostUsers)
-      .where(or(eq(hostUsers.username, username), eq(hostUsers.email, username)))
+      .where(or(eq(sql`lower(${hostUsers.username})`, username), eq(sql`lower(${hostUsers.email})`, username)))
       .limit(1);
 
-    if (!hostUser || !(await verifyPassword(password, hostUser.passwordHash))) {
+    if (!hostUser) {
+      return NextResponse.json(
+        { success: false, message: "Invalid credentials" },
+        { status: 401 }
+      );
+    }
+
+    const passwordCheck = await verifyPasswordAndUpgrade(password, hostUser.passwordHash);
+    if (!passwordCheck.valid) {
       return NextResponse.json(
         { success: false, message: "Invalid credentials" },
         { status: 401 }
@@ -38,7 +46,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    await db.update(hostUsers).set({ lastLoginAt: new Date() }).where(eq(hostUsers.id, hostUser.id));
+    await db.update(hostUsers).set({
+      lastLoginAt: new Date(),
+      ...(passwordCheck.upgradedHash ? { passwordHash: passwordCheck.upgradedHash } : {}),
+    }).where(eq(hostUsers.id, hostUser.id));
 
     const [organization] = hostUser.organizationId
       ? await db
